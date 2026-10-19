@@ -19,10 +19,26 @@ java {
 }
 
 application {
-	mainClass = 'justfatlard.past_echos.preprocess.inventory.Inventory'
-	applicationName = 'past-echos-inventory'
+	mainClass = 'justfatlard.past_echos.preprocess.Main'
+	applicationName = 'past-echos'
 }
 
 test {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeTags 'regen'
+	}
+}
+
+// Stage one end to end: downloads Mojang's server jars and runs them, several minutes.
+tasks.register('regenTest', Test) {
+	description = 'Regenerates the built test worlds with the real server jars and diffs them.'
+	group = 'verification'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'regen'
+	}
+	testLogging {
+		events 'passed', 'failed'
+	}
 }

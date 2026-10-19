@@ -100,7 +100,7 @@ public final class Inventory {
 			System.err.println(problem);
 			System.err.println();
 		}
-		System.err.println("usage: past-echos-inventory [--json FILE] [--copies] [--quiet] PATH...");
+		System.err.println("usage: past-echos inventory [--json FILE] [--copies] [--quiet] PATH...");
 		System.err.println();
 		System.err.println("  PATH      folders, zips, tars or tar.gz files; scanned recursively, archives inside archives too");
 		System.err.println("  --json    also write the full inventory as JSON, for the preprocessor");

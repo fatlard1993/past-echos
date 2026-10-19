@@ -13,6 +13,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import justfatlard.past_echos.preprocess.inventory.WorldRecord.Era;
 import justfatlard.past_echos.preprocess.inventory.WorldRecord.Pipeline;
+import justfatlard.past_echos.preprocess.world.Nbt;
 
 /**
  * Turns collected facts into world records: which chunk folders belong to which level.dat, what

@@ -1,9 +1,12 @@
-package justfatlard.past_echos.preprocess.inventory;
+package justfatlard.past_echos.preprocess.world;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -15,7 +18,8 @@ import java.util.Optional;
 
 /**
  * A reader for every NBT dialect a save has used: big-endian for Java Edition, little-endian for
- * Bedrock. Compounds become maps, lists become lists, arrays stay primitive arrays.
+ * Bedrock. Compounds become maps, lists become lists, arrays stay primitive arrays. Writes
+ * big-endian back from the same shapes.
  */
 public final class Nbt {
 	private static final int MAX_DEPTH = 512;
@@ -31,6 +35,86 @@ public final class Nbt {
 		}
 		reader.string();
 		return reader.compound(0);
+	}
+
+	/**
+	 * Big-endian NBT for a root compound shaped as {@link #read} returns it. Tag types come from
+	 * the Java types, so an empty list is written as a list of nothing, which the game accepts.
+	 */
+	public static byte[] write(Map<String, Object> root) {
+		ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+		try (DataOutputStream out = new DataOutputStream(bytes)) {
+			out.writeByte(10);
+			out.writeUTF("");
+			writeCompound(out, root);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		return bytes.toByteArray();
+	}
+
+	private static int type(Object value) {
+		return switch (value) {
+			case Byte b -> 1;
+			case Short s -> 2;
+			case Integer i -> 3;
+			case Long l -> 4;
+			case Float f -> 5;
+			case Double d -> 6;
+			case byte[] b -> 7;
+			case String s -> 8;
+			case List<?> l -> 9;
+			case Map<?, ?> m -> 10;
+			case int[] a -> 11;
+			case long[] a -> 12;
+			default -> throw new IllegalArgumentException("no NBT type for " + value.getClass());
+		};
+	}
+
+	private static void writeCompound(DataOutputStream out, Map<?, ?> map) throws IOException {
+		for (Map.Entry<?, ?> e : map.entrySet()) {
+			out.writeByte(type(e.getValue()));
+			out.writeUTF((String) e.getKey());
+			writePayload(out, e.getValue());
+		}
+		out.writeByte(0);
+	}
+
+	private static void writePayload(DataOutputStream out, Object value) throws IOException {
+		switch (value) {
+			case Byte b -> out.writeByte(b);
+			case Short s -> out.writeShort(s);
+			case Integer i -> out.writeInt(i);
+			case Long l -> out.writeLong(l);
+			case Float f -> out.writeFloat(f);
+			case Double d -> out.writeDouble(d);
+			case byte[] b -> {
+				out.writeInt(b.length);
+				out.write(b);
+			}
+			case String s -> out.writeUTF(s);
+			case List<?> list -> {
+				out.writeByte(list.isEmpty() ? 0 : type(list.getFirst()));
+				out.writeInt(list.size());
+				for (Object item : list) {
+					writePayload(out, item);
+				}
+			}
+			case Map<?, ?> map -> writeCompound(out, map);
+			case int[] a -> {
+				out.writeInt(a.length);
+				for (int v : a) {
+					out.writeInt(v);
+				}
+			}
+			case long[] a -> {
+				out.writeInt(a.length);
+				for (long v : a) {
+					out.writeLong(v);
+				}
+			}
+			default -> throw new IllegalArgumentException("no NBT type for " + value.getClass());
+		}
 	}
 
 	@SuppressWarnings("unchecked")

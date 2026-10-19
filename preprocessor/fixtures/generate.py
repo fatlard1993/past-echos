@@ -19,6 +19,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -26,6 +27,10 @@ from pathlib import Path
 VERSIONS = ["1.2.5", "1.6.4", "1.8.9", "1.12.2", "1.16.5", "1.18.2", "1.20.4", "26.3"]
 SEED = "8675309"
 KEEP_RADIUS = 2
+# From 1.13.1 the spawn area is forceloaded too: 26.x keeps no spawn chunks, so would leave
+# only the chunk under spawn finished. The console runs commands at the world spawn.
+FORCELOAD = "forceload add ~-40 ~-40 ~40 ~40"
+FORCELOAD_WAIT = 30
 MANIFEST = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 
 HERE = Path(__file__).resolve().parent
@@ -56,7 +61,12 @@ def server_jar(version, manifest):
     return jar
 
 
-def run_server(jar, workdir):
+def has_forceload(version):
+    parts = [int(p) for p in version.split(".")]
+    return parts >= [1, 13, 1]
+
+
+def run_server(jar, workdir, forceload=False):
     (workdir / "eula.txt").write_text("eula=true\n")
     (workdir / "server.properties").write_text(
         f"level-seed={SEED}\nonline-mode=false\nserver-port=0\nlevel-name=world\nspawn-protection=0\n"
@@ -69,6 +79,10 @@ def run_server(jar, workdir):
     for line in proc.stdout:
         log.append(line)
         if "Done (" in line:
+            if forceload:
+                proc.stdin.write(FORCELOAD + "\n")
+                proc.stdin.flush()
+                time.sleep(FORCELOAD_WAIT)
             proc.stdin.write("save-all\nstop\n")
             proc.stdin.flush()
     proc.wait(timeout=300)
@@ -144,7 +158,7 @@ def main():
         jar = server_jar(version, manifest)
         with tempfile.TemporaryDirectory(prefix=f"fixture-{version}-") as tmp:
             tmp = Path(tmp)
-            run_server(jar, tmp)
+            run_server(jar, tmp, has_forceload(version))
             trimmed = tmp / "trimmed" / f"world-{version}"
             trimmed.mkdir(parents=True)
             chunks = trimmed_world(tmp / "world", trimmed)

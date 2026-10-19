@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import justfatlard.past_echos.preprocess.world.Nbt;
 
 /**
  * Gathers the facts a world leaves on disk, one file at a time and in whatever order an archive

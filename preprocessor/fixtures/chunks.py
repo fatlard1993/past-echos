@@ -222,3 +222,102 @@ def sections(root):
 			continue
 		out[y] = blocks
 	return out
+
+
+# -- writing ------------------------------------------------------------------------------
+
+def serialize(root):
+	out = bytearray([COMPOUND, 0, 0])
+	_write(root, out)
+	return bytes(out)
+
+
+def write_region(path, chunks):
+	"""A region file holding (cx, cz, root) chunks, zlib-compressed, save times left at zero."""
+	locations = bytearray(4096)
+	body = bytearray()
+	for cx, cz, root in chunks:
+		data = zlib.compress(serialize(root))
+		record = struct.pack(">ib", len(data) + 1, 2) + data
+		record += bytes(-len(record) % 4096)
+		slot = (cz & 31) * 32 + (cx & 31)
+		struct.pack_into(">I", locations, slot * 4, ((2 + len(body) // 4096) << 8) | (len(record) // 4096))
+		body += record
+	Path(path).write_bytes(bytes(locations) + bytes(4096) + bytes(body))
+
+
+def _pack(values, bits, spanning):
+	n = len(values)
+	if spanning:
+		longs = [0] * math.ceil(n * bits / 64)
+		for i, v in enumerate(values):
+			word, shift = divmod(i * bits, 64)
+			longs[word] |= (v << shift) & 0xFFFFFFFFFFFFFFFF
+			if shift + bits > 64:
+				longs[word + 1] |= v >> (64 - shift)
+	else:
+		per = 64 // bits
+		longs = [0] * math.ceil(n / per)
+		for i, v in enumerate(values):
+			word, slot = divmod(i, per)
+			longs[word] |= v << (slot * bits)
+	return [v - (1 << 64) if v >= 1 << 63 else v for v in longs]
+
+
+def _palette_entry(palette, name):
+	"""A new palette entry for a property-less block, written the way the palette's others are."""
+	full = "minecraft:" + name
+	if palette.item == STRING:
+		return Tag(STRING, full)
+	if palette.value and list(palette.value[0].value) == [""]:
+		return Tag(COMPOUND, {"": Tag(STRING, full)})
+	if palette.value and "id" in palette.value[0]:
+		return Tag(COMPOUND, {"id": Tag(STRING, full)})
+	return Tag(COMPOUND, {"Name": Tag(STRING, full)})
+
+
+def set_blocks(root, changes):
+	"""Sets blocks in a chunk: changes maps (local x, y, local z) to a name as sections() gives it.
+	Numeric names are "id:meta"; palette names must be blocks without properties."""
+	level = chunk_level(root)
+	key = "Sections" if "Sections" in level else "sections"
+	data_version = root.get("DataVersion")
+	spanning = data_version is not None and data_version.value < 2529
+	by_section = {}
+	for (x, y, z), name in changes.items():
+		by_section.setdefault(y >> 4, {})[(y & 15) << 8 | z << 4 | x] = name
+	for sy, edits in by_section.items():
+		section = next((s for s in level[key].value if s["Y"].value == sy), None)
+		numeric = any("Blocks" in s for s in level[key].value)
+		if section is None:
+			if numeric:
+				section = Tag(COMPOUND, {"Y": Tag(BYTE, sy), "Blocks": Tag(BYTES, bytes(4096)), "Data": Tag(BYTES, bytes(2048)),
+				                         "SkyLight": Tag(BYTES, b"\xff" * 2048), "BlockLight": Tag(BYTES, bytes(2048))})
+			else:
+				section = Tag(COMPOUND, {"Y": Tag(BYTE, sy), "Palette": Tag(LIST, [Tag(COMPOUND, {"Name": Tag(STRING, "minecraft:air")})], COMPOUND),
+				                         "BlockStates": Tag(LONGS, [0] * 256)})
+			level[key].value.append(section)
+		if numeric:
+			ids, meta = bytearray(section["Blocks"].value), bytearray(section["Data"].value)
+			for i, name in edits.items():
+				block, m = (0, 0) if name == "air" else (int(p) for p in name.split(":"))
+				ids[i] = block
+				meta[i >> 1] = (meta[i >> 1] & (0xF0 if i & 1 == 0 else 0x0F)) | (m << ((i & 1) * 4))
+			section["Blocks"].value, section["Data"].value = bytes(ids), bytes(meta)
+			continue
+		states = section.get("block_states")
+		holder, pkey, dkey = (states, "palette", "data") if states else (section, "Palette", "BlockStates")
+		palette = holder[pkey]
+		names = [_state(p) for p in palette.value]
+		if dkey in holder:
+			bits = max(4, math.ceil(math.log2(len(names))))
+			values = _unpack(holder[dkey].value, bits, 4096, spanning)
+		else:
+			values = [0] * 4096
+		for i, name in edits.items():
+			if name not in names:
+				palette.value.append(_palette_entry(palette, name))
+				names.append(name)
+			values[i] = names.index(name)
+		bits = max(4, math.ceil(math.log2(len(names))))
+		holder.value[dkey] = Tag(LONGS, _pack(values, bits, spanning))
