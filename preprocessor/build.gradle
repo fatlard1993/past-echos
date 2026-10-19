@@ -1,0 +1,28 @@
+plugins {
+	id 'application'
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	testImplementation platform('org.junit:junit-bom:5.13.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+application {
+	mainClass = 'justfatlard.past_echos.preprocess.inventory.Inventory'
+	applicationName = 'past-echos-inventory'
+}
+
+test {
+	useJUnitPlatform()
+}

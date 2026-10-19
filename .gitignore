@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.sublime-*
+
+# Fabric
+run/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local
+*.local
+
+# Fixture generator downloads
+preprocessor/fixtures/.cache/
+
+# Python
+__pycache__/
+
+# Experiment output (rerun to regenerate)
+preprocessor/experiments/determinism.json

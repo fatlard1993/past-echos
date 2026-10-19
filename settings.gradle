@@ -1,0 +1,3 @@
+rootProject.name = 'past-echos'
+
+include 'preprocessor'
