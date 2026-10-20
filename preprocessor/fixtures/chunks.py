@@ -265,20 +265,39 @@ def _pack(values, bits, spanning):
 
 
 def _palette_entry(palette, name):
-	"""A new palette entry for a property-less block, written the way the palette's others are."""
-	full = "minecraft:" + name
-	if palette.item == STRING:
+	"""A new palette entry for "name" or "name[key=value,...]", written the way the palette's others are."""
+	full, _, props = name.partition("[")
+	full = "minecraft:" + full
+	props = dict(p.split("=") for p in props.rstrip("]").split(",")) if props else {}
+	if palette.item == STRING and not props:
 		return Tag(STRING, full)
-	if palette.value and list(palette.value[0].value) == [""]:
-		return Tag(COMPOUND, {"": Tag(STRING, full)})
-	if palette.value and "id" in palette.value[0]:
-		return Tag(COMPOUND, {"id": Tag(STRING, full)})
-	return Tag(COMPOUND, {"Name": Tag(STRING, full)})
+	if palette.item == STRING:
+		# A compound joins a list of strings: the list becomes one of compounds, strings wrapped.
+		palette.value = [Tag(COMPOUND, {"": p}) for p in palette.value]
+		palette.item = COMPOUND
+	modern = palette.value and ("id" in palette.value[0] or list(palette.value[0].value) == [""])
+	if not props:
+		return Tag(COMPOUND, {"": Tag(STRING, full)} if modern and list(palette.value[0].value) == [""] else
+		           {("id" if modern else "Name"): Tag(STRING, full)})
+	properties = Tag(COMPOUND, {k: Tag(STRING, v) for k, v in props.items()})
+	if modern:
+		return Tag(COMPOUND, {"id": Tag(STRING, full), "properties": properties})
+	return Tag(COMPOUND, {"Name": Tag(STRING, full), "Properties": properties})
+
+
+def add_block_entity(root, entity):
+	"""Adds a block entity compound: Level.TileEntities until 1.18, block_entities after."""
+	level = root.get("Level")
+	holder, key = (level, "TileEntities") if level is not None else (root, "block_entities")
+	if key not in holder.value:
+		holder.value[key] = Tag(LIST, [], COMPOUND)
+	holder[key].item = COMPOUND
+	holder[key].value.append(entity)
 
 
 def set_blocks(root, changes):
 	"""Sets blocks in a chunk: changes maps (local x, y, local z) to a name as sections() gives it.
-	Numeric names are "id:meta"; palette names must be blocks without properties."""
+	Numeric names are "id:meta", palette names "name" or "name[key=value,...]"."""
 	level = chunk_level(root)
 	key = "Sections" if "Sections" in level else "sections"
 	data_version = root.get("DataVersion")

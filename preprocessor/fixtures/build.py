@@ -3,9 +3,9 @@
 block changed, so a diff of the two can be checked exactly.
 
 The build sits in the middle chunk: a 7x7 hut on the median ground height (cobblestone floor,
-plank walls with glass windows and a doorway, stone brick roof, a glowstone lamp in the floor)
-and a two-high tunnel dug through the stone below it. Reads worlds/<version>.zip, writes
-worlds/<version>-built.zip holding the world and build.json.
+plank walls with glass windows and a doorway, stone brick roof, a glowstone lamp in the floor, a
+sign on the back wall inside) and a two-high tunnel dug through the stone below it. Reads
+worlds/<version>.zip, writes worlds/<version>-built.zip holding the world and build.json.
 
 usage: build.py [VERSION ...]    (no arguments: every world generate.py made)
 """
@@ -27,8 +27,37 @@ WORLDS = HERE.parent / "src/test/resources/worlds"
 HUT_X, HUT_Z, HUT_SIZE, HUT_HEIGHT = 4, 2, 7, 4
 TUNNEL_Z, TUNNEL_Y = 13, (24, 25)
 
-NUMERIC = {"floor": "4:0", "wall": "5:0", "window": "20:0", "lamp": "89:0", "roof": "98:0", "air": "air"}
-PALETTE = {"floor": "cobblestone", "wall": "oak_planks", "window": "glass", "lamp": "glowstone", "roof": "stone_bricks", "air": "air"}
+SIGN_TEXT = ["past echoes", "test hut", "", ""]
+
+# Wall sign meta 2 and facing=north both face into the hut from the south wall.
+NUMERIC = {"floor": "4:0", "wall": "5:0", "window": "20:0", "lamp": "89:0", "roof": "98:0", "sign": "68:2", "air": "air"}
+PALETTE = {"floor": "cobblestone", "wall": "oak_planks", "window": "glass", "lamp": "glowstone", "roof": "stone_bricks",
+           "sign": "oak_wall_sign[facing=north,waterlogged=false]", "air": "air"}
+# 26.x leaves default property values out, and north and dry are the defaults.
+PALETTE_26 = dict(PALETTE, sign="oak_wall_sign")
+
+
+def version_key(version):
+	return tuple(int(p) for p in version.split("."))
+
+
+def sign_entity(version, x, y, z):
+	"""The sign's block entity as the version saves it: plain lines to 1.7, JSON lines from 1.8,
+	front_text from 1.20, text components as NBT from 1.21.5."""
+	v = version_key(version)
+	tag = {"x": chunks.Tag(chunks.INT, x), "y": chunks.Tag(chunks.INT, y), "z": chunks.Tag(chunks.INT, z),
+	       "id": chunks.Tag(chunks.STRING, "Sign" if v < (1, 11) else "minecraft:sign")}
+	line = (lambda t: t) if v < (1, 8) or v >= (1, 21, 5) else (lambda t: json.dumps({"text": t}))
+	if v < (1, 20):
+		for i, text in enumerate(SIGN_TEXT, 1):
+			tag[f"Text{i}"] = chunks.Tag(chunks.STRING, line(text))
+	else:
+		for side, lines in (("front_text", SIGN_TEXT), ("back_text", [""] * 4)):
+			tag[side] = chunks.Tag(chunks.COMPOUND, {
+				"messages": chunks.Tag(chunks.LIST, [chunks.Tag(chunks.STRING, line(t)) for t in lines], chunks.STRING),
+				"color": chunks.Tag(chunks.STRING, "black"), "has_glowing_text": chunks.Tag(chunks.BYTE, 0)})
+		tag["is_waxed"] = chunks.Tag(chunks.BYTE, 0)
+	return chunks.Tag(chunks.COMPOUND, tag)
 
 
 def canonical(state):
@@ -64,6 +93,9 @@ def design(tops):
 				if dz == 0 and dx == middle and dy in (1, 2):
 					part = "air"
 				parts[x, floor + dy, z] = part
+			# The sign, inside against the back wall beside its window.
+			if dx == middle + 1 and dz == last - 1:
+				parts[x, floor + 2, z] = "sign"
 			parts[x, floor + HUT_HEIGHT, z] = "roof"
 	for x in range(16):
 		for y in TUNNEL_Y:
@@ -99,10 +131,11 @@ def build(version):
 
 		before = chunks.sections(root)
 		numeric = any(re.fullmatch(r"\d+:\d+", b) for blocks in before.values() for b in blocks[:16])
-		names = NUMERIC if numeric else PALETTE
+		names = NUMERIC if numeric else PALETTE_26 if version_key(version) >= (26,) else PALETTE
 		tops = column_tops(before, range(HUT_X, HUT_X + HUT_SIZE), range(HUT_Z, HUT_Z + HUT_SIZE))
 		changes, manifest = {}, []
-		for (x, y, z), part in sorted(design(tops).items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
+		parts = design(tops)
+		for (x, y, z), part in sorted(parts.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
 			was = canonical(before[y >> 4][(y & 15) << 8 | z << 4 | x]) if y >> 4 in before else "air"
 			now = names[part]
 			if was == now:
@@ -110,6 +143,8 @@ def build(version):
 			changes[x, y, z] = now
 			manifest.append({"x": cx * 16 + x, "y": y, "z": cz * 16 + z, "before": was, "after": now})
 		chunks.set_blocks(root, changes)
+		sign = next((cx * 16 + x, y, cz * 16 + z) for (x, y, z), part in parts.items() if part == "sign")
+		chunks.add_block_entity(root, sign_entity(version, *sign))
 		chunks.write_region(region, regions[region])
 
 		# Read back through the same decoder, so the manifest is what the edited file holds.
@@ -126,7 +161,8 @@ def build(version):
 			for f in sorted(world.rglob("*")):
 				if f.is_file():
 					out.write(f, f.relative_to(world.parent))
-			out.writestr("build.json", json.dumps({"chunk": [cx, cz], "blocks": manifest}, indent=1))
+			out.writestr("build.json", json.dumps({"chunk": [cx, cz], "blocks": manifest,
+			                                       "sign": {"x": sign[0], "y": sign[1], "z": sign[2], "text": SIGN_TEXT}}, indent=1))
 		print(f"{version}: {len(manifest)} blocks changed in chunk {cx},{cz} -> {target.name} ({target.stat().st_size:,} bytes)")
 
 

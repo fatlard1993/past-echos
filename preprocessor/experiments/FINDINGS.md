@@ -35,3 +35,69 @@ chunks decorated in all three, their neighbours too.
 
 Implication: a (reference, saved) block-pair noise table, learned from runs like these, scores
 diffs, and connected components of unlikely pairs are the substance.
+
+# Extraction calibration (stage 2, 2026-10-19)
+
+Clusters of evidence-carrying blocks (Evidence.java weights, within 2 blocks on every axis),
+scored by summed weight. Noise: the determinism runs' A against moved, 8 versions, 570k blocks
+(src/test/resources/diffs/*-noise). Builds: the test hut in each version's regenerated diff.
+
+| | highest score | what it was |
+|-|---------------|-------------|
+| noise, all weights | 68.5 | a lake carved in one generation only: 274 dirt/stone -> air (1.16.5) |
+| noise, earthwork left out | 4.6 | mineshaft fragments: rails gone, cobwebs and planks moved (1.16.5) |
+| test hut, every version | 110.5 | 168 evidence blocks |
+| test tunnel (32 dug blocks) | 0 (3-8 with earthwork) | |
+
+- Digging can't be told from regeneration's lakes, springs and falling gravel by amount: a lake
+  outscores a 16-block tunnel eightfold. Earthwork extends a cluster but never makes an echo.
+- With earthwork out, this corpus tops out under half the threshold of 10.
+
+Held out: ten fresh untouched worlds on seeds 1001, 31337 and 2024, through the real pipeline
+(generate, past-echos diff, past-echos extract). Four produced "echoes" the tuning corpus never
+showed, all generator work:
+
+| world | false echoes | what it was |
+|-------|--------------|-------------|
+| 26.3 seed 31337 | 29, up to 765 | an ancient city: sculk spreads over its bricks differently each time |
+| 1.18.2 seed 1001 | 1, 50 | a dungeon one generation placed and the other didn't |
+| 1.18.2 seed 31337 | 2, 40 | cobblestone columns where lava met water |
+| 1.16.5 seed 2024 | 1, 11 | the same |
+
+- Anything touching sculk now weighs nothing, and scattered structure blocks (dungeon walls,
+  mineshafts) weigh nothing when they disappear.
+- Cobblestone alone is ambiguous: the generator makes it by the dozen. No noise cluster held
+  more than one block of the built kind (doors, glass, crafting tables, bricks), so an echo now
+  needs 3. The cost: a bare cobblestone wall or plank bridge, with nothing else, is lost.
+- One seed was not enough vocabulary; these four diffs are now test fixtures. Since they shaped
+  the rules, a second fresh batch checks them.
+
+Second batch: twelve worlds, seeds 777, 90210 and 5150, every version. Eleven were clean (the
+highest rejected cluster scored 68.5 with no placed blocks); two 26.3 worlds were not:
+
+| world | false echoes | what it was |
+|-------|--------------|-------------|
+| 26.3 seed 777 | 13, up to 813 | sulfur caves: sulfur, cinnabar, sulfur_spike, all new to the vocabulary |
+| 26.3 seed 5150 | 2, up to 434 | the same |
+
+- Unknown blocks default to built, so each new version's natural blocks are false evidence
+  until listed. A list can't keep up, but the diff knows: regeneration noise is symmetric, so a
+  block common on the reference side (16 or more, and a quarter of its saved-side count) is the
+  generator's. That learned sulfur and cinnabar, and on its own the ancient city's bricks.
+- sulfur_spike was lopsided (7 reference, 63 saved): it grows while the world runs, like
+  pointed dripstone. What's left of such a cluster is nearly one block, so an echo's commonest
+  placed or structure block may be at most 80% of them. The test hut's is 40%. The cost: a
+  build of one material alone, such as a glass dome, is lost.
+- After both fixes all 34 noise diffs give no echoes and all 8 huts do. The sulfur worlds are
+  fixtures now too, so the next fresh batch is the honest check.
+
+Third batch: twelve worlds, seeds 4242, 8008 and 123456789, every version. Eleven clean; one
+false echo, barely over the line (score 12.1, 9 placed): an ocean ruin in 1.20.4, whose bricks
+crumble at random, so regeneration lost some and gained others in the same spot.
+
+- Within one cluster, a block that is both lost and gained is a structure regenerated
+  differently: a player's blocks are only gained. Such blocks still give the cluster its
+  extent but count toward nothing. The ruin's diff is a fixture now.
+- Totals after: 48 noise diffs (35 worlds and the determinism runs), no echoes; 8 huts, found.
+- Each batch so far turned up something, smaller each time: an ancient city, then sulfur caves,
+  then one ruin worth 12. Real worlds will find more; extract's echoes.json is where to look.

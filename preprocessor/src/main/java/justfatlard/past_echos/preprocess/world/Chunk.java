@@ -67,6 +67,17 @@ public final class Chunk {
 		return level().get("Status") instanceof String;
 	}
 
+	/** Block entities (signs, chests, banners) as saved, each placed by its world x, y and z. */
+	@SuppressWarnings("unchecked")
+	public List<Map<String, Object>> blockEntities() {
+		Map<String, Object> level = level();
+		Object list = level.get(level.containsKey("TileEntities") ? "TileEntities" : "block_entities");
+		if (!(list instanceof List<?> entities)) {
+			return List.of();
+		}
+		return entities.stream().filter(Map.class::isInstance).map(e -> (Map<String, Object>) e).toList();
+	}
+
 	/** The non-empty sections by section y. Air-only sections are left out. */
 	public Map<Integer, Section> sections() {
 		if (sections == null) {

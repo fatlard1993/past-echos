@@ -27,8 +27,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  * Each generated test world against its copy with a build placed in it (fixtures/build.py). Both
  * come from one generation, so the diff must be the build exactly, as build.json lists it.
  */
-class DiffTest {
-	static Path resource(String name) {
+public class DiffTest {
+	public static Path resource(String name) {
 		try {
 			return Path.of(DiffTest.class.getResource("/" + name).toURI());
 		} catch (URISyntaxException e) {
@@ -38,7 +38,7 @@ class DiffTest {
 
 	/** The build as "x,y,z reference -> saved" lines. */
 	@SuppressWarnings("unchecked")
-	static Set<String> manifest(FileSystem built) throws IOException {
+	public static Set<String> manifest(FileSystem built) throws IOException {
 		Map<String, Object> json = (Map<String, Object>) Json.parse(Files.readString(built.getPath("/build.json")));
 		return ((List<Map<String, Object>>) json.get("blocks")).stream()
 				.map(b -> b.get("x") + "," + b.get("y") + "," + b.get("z") + " " + b.get("before") + " -> " + b.get("after"))
@@ -69,6 +69,17 @@ class DiffTest {
 			assertEquals(expected.size(), stats.blocks());
 			assertEquals(List.of(), stats.unreadable());
 			assertTrue(stats.compared() > 1, "more than the build's chunk compared: " + stats);
+		}
+	}
+
+	@Test
+	void anEarlierCopyStandsInForTheRegeneration(@TempDir Path tmp) throws IOException {
+		try (FileSystem plain = FileSystems.newFileSystem(resource("worlds/1.12.2.zip"));
+				FileSystem built = FileSystems.newFileSystem(resource("worlds/1.12.2-built.zip"))) {
+			Diff.Outcome o = Diff.against(Diff.findWorld(built.getPath("/")), Diff.findWorld(plain.getPath("/")), "1.12.2", tmp);
+			assertEquals(manifest(built), lines(DiffFile.read(o.diffFile())));
+			assertEquals(0, o.stats().unsettledReference());
+			assertEquals(0, o.reference().serverRuns());
 		}
 	}
 
