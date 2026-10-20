@@ -32,7 +32,7 @@ class RegenTest {
 	@ValueSource(strings = {"1.2.5", "1.6.4", "1.8.9", "1.12.2", "1.16.5", "1.18.2", "1.20.4", "26.3"})
 	void regeneratedDiffHoldsTheBuild(String version, @TempDir Path tmp) throws IOException {
 		try (FileSystem built = FileSystems.newFileSystem(DiffTest.resource("worlds/" + version + "-built.zip"))) {
-			Diff.Outcome o = Diff.run(Diff.findWorld(built.getPath("/")), version, tmp, "2G", message -> {
+			Diff.Outcome o = Diff.run(Diff.findWorld(built.getPath("/")), version, tmp, "2G", 0, message -> {
 			});
 			assertEquals(0, o.stats().unsettledReference(), "every settled saved chunk regenerated");
 			assertEquals(List.of(), o.reference().unsettled());

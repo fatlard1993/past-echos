@@ -9,8 +9,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
@@ -35,6 +37,8 @@ public final class Regenerator {
 	/** Chunks either side of the spawn chunk that end up settled: the area reaches 12, decoration needs one more. */
 	private static final int SPAWN_REACH = 10;
 	private static final int BATCH = 256;
+	/** Chunks one server generates before a fresh one takes over: its heap fills over a long run. */
+	private static final int RUN = 8192;
 	private static final Duration POLL = Duration.ofSeconds(2);
 	private static final Duration BATCH_TIMEOUT = Duration.ofMinutes(15);
 	private static final Duration SAVE_TIMEOUT = Duration.ofMinutes(5);
@@ -115,6 +119,24 @@ public final class Regenerator {
 		}
 	}
 
+	/**
+	 * The batch's chunks still unsettled, reading only the regions they and their north-west
+	 * neighbours lie in rather than the whole world, which grows with every batch.
+	 */
+	private static List<int[]> unsettledIn(Path world, List<int[]> batch) throws IOException {
+		Set<String> regions = new HashSet<>();
+		for (int[] c : batch) {
+			for (int[] n : new int[][] {{0, 0}, {-1, 0}, {0, -1}, {-1, -1}}) {
+				regions.add("r." + (c[0] + n[0] >> 5) + "." + (c[1] + n[1] >> 5) + ".");
+			}
+		}
+		Dimension reference = Dimension.read(Dimension.overworldRegions(world), file -> {
+			String name = file.getFileName().toString();
+			return regions.contains(name.substring(0, name.lastIndexOf('.') + 1));
+		});
+		return batch.stream().filter(c -> !reference.settled(c[0], c[1])).toList();
+	}
+
 	private static List<int[]> unsettled(Path world, List<int[]> needed) throws IOException {
 		Dimension reference = Dimension.read(Dimension.overworldRegions(world));
 		return needed.stream().filter(c -> !reference.settled(c[0], c[1])).toList();
@@ -125,19 +147,23 @@ public final class Regenerator {
 		// Region by region, so each batch touches few files and its chunks neighbour each other.
 		ordered.sort(Comparator.<int[]>comparingInt(c -> c[0] >> 5).thenComparingInt(c -> c[1] >> 5)
 				.thenComparingInt(c -> c[1]).thenComparingInt(c -> c[0]));
-		try (Server server = Server.start(jar, workDir, maxHeap)) {
-			for (int from = 0; from < ordered.size(); from += BATCH) {
-				List<int[]> batch = ordered.subList(from, Math.min(from + BATCH, ordered.size()));
-				for (int[] c : batch) {
-					server.send("forceload add " + c[0] * 16 + " " + c[1] * 16);
+		int runs = 0;
+		for (int start = 0; start < ordered.size(); start += RUN) {
+			try (Server server = Server.start(jar, workDir, maxHeap)) {
+				for (int from = start; from < Math.min(start + RUN, ordered.size()); from += BATCH) {
+					List<int[]> batch = ordered.subList(from, Math.min(from + BATCH, ordered.size()));
+					for (int[] c : batch) {
+						server.send("forceload add " + c[0] * 16 + " " + c[1] * 16);
+					}
+					awaitSettled(server, world, batch);
+					server.send("forceload remove all");
+					progress.accept(String.format("  %,d of %,d generated", from + batch.size(), ordered.size()));
 				}
-				awaitSettled(server, world, batch);
-				server.send("forceload remove all");
-				progress.accept(String.format("  %,d of %,d generated", from + batch.size(), ordered.size()));
+				server.stop();
 			}
-			server.stop();
+			runs++;
 		}
-		return 1;
+		return runs;
 	}
 
 	private void awaitSettled(Server server, Path world, List<int[]> batch) throws IOException {
@@ -146,7 +172,7 @@ public final class Regenerator {
 			server.send("save-all flush");
 			server.await(line -> line.contains("Saved the game"), SAVE_TIMEOUT);
 			// Read while the server runs: a chunk caught mid-write reads as missing and is asked about again.
-			if (unsettled(world, batch).isEmpty()) {
+			if (unsettledIn(world, batch).isEmpty()) {
 				return;
 			}
 			if (System.nanoTime() > deadline) {

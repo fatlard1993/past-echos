@@ -21,6 +21,8 @@ import justfatlard.past_echos.preprocess.world.Nbt;
  */
 public final class Diff {
 	private static final int LEVEL_SEARCH_DEPTH = 4;
+	/** A minute of a player nearby: less is a flyover, too short to have built anything. */
+	public static final long MIN_INHABITED = 1200;
 
 	public record Outcome(Path diffFile, WorldDiff.Stats stats, Regenerator.Result reference) {
 	}
@@ -32,6 +34,7 @@ public final class Diff {
 		String version = null;
 		Path out = null;
 		String heap = "3G";
+		long minInhabited = MIN_INHABITED;
 		Path world = null;
 		Path referenceWorld = null;
 		for (int i = 0; i < args.length; i++) {
@@ -39,6 +42,7 @@ public final class Diff {
 				case "--version" -> version = value(args, ++i, "--version needs a Minecraft version");
 				case "--out" -> out = Path.of(value(args, ++i, "--out needs a folder"));
 				case "--heap" -> heap = value(args, ++i, "--heap needs a size such as 3G");
+				case "--min-inhabited" -> minInhabited = Long.parseLong(value(args, ++i, "--min-inhabited needs a number of ticks"));
 				case "--reference" -> referenceWorld = Path.of(value(args, ++i, "--reference needs a world folder or zip"));
 				case "--help", "-h" -> {
 					usage(null);
@@ -72,12 +76,16 @@ public final class Diff {
 				usage("this world names no version (worlds before 1.9 don't); give the one it was generated with as --version");
 				return;
 			}
-			Outcome o = referenceRoot == null ? run(root, version, out, heap, System.err::println) : against(root, referenceRoot, version, out);
+			Outcome o = referenceRoot == null ? run(root, version, out, heap, minInhabited, System.err::println)
+					: against(root, referenceRoot, version, out, minInhabited);
 			WorldDiff.Stats s = o.stats;
 			System.out.printf("%s: %,d saved chunks, %,d compared, %,d differ (%,d blocks)%n",
 					version, s.savedChunks(), s.compared(), s.differing(), s.blocks());
 			if (s.unsettledSaved() > 0) {
 				System.out.printf("  %,d saved chunks skipped: generation unfinished when saved%n", s.unsettledSaved());
+			}
+			if (s.unvisited() > 0) {
+				System.out.printf("  %,d chunks skipped: under %,d ticks of a player nearby%n", s.unvisited(), minInhabited);
 			}
 			if (s.unsettledReference() > 0) {
 				System.out.printf("  %,d chunks skipped: %s%n", s.unsettledReference(),
@@ -98,22 +106,23 @@ public final class Diff {
 	}
 
 	/** Regenerates into out/reference and writes out/overworld.diff.gz and out/diff.json. */
-	public static Outcome run(Path world, String version, Path out, String heap, java.util.function.Consumer<String> progress) throws IOException {
+	public static Outcome run(Path world, String version, Path out, String heap, long minInhabited, java.util.function.Consumer<String> progress)
+			throws IOException {
 		Files.createDirectories(out);
 		Dimension saved = Dimension.read(Dimension.overworldRegions(world));
 		List<int[]> needed = new ArrayList<>();
 		for (int[] c : saved.positions()) {
-			if (saved.settled(c[0], c[1])) {
+			if (saved.settled(c[0], c[1]) && saved.visited(c[0], c[1], minInhabited)) {
 				needed.add(c);
 			}
 		}
 		Regenerator regenerator = new Regenerator(new ServerJars(ServerJars.defaultCache()), heap, progress);
 		Regenerator.Result reference = regenerator.regenerate(world, version, needed, out.resolve("reference"));
-		return write(saved, reference, version, out);
+		return write(saved, reference, version, out, minInhabited);
 	}
 
 	/** Diffs against an untouched earlier copy of the world instead of a regeneration. */
-	public static Outcome against(Path world, Path referenceWorld, String version, Path out) throws IOException {
+	public static Outcome against(Path world, Path referenceWorld, String version, Path out, long minInhabited) throws IOException {
 		Files.createDirectories(out);
 		Dimension saved = Dimension.read(Dimension.overworldRegions(world));
 		Dimension reference = Dimension.read(Dimension.overworldRegions(referenceWorld));
@@ -123,14 +132,15 @@ public final class Diff {
 				unsettled.add(c);
 			}
 		}
-		return write(saved, new Regenerator.Result(referenceWorld, reference, unsettled, 0), version, out);
+		return write(saved, new Regenerator.Result(referenceWorld, reference, unsettled, 0), version, out, minInhabited);
 	}
 
-	private static Outcome write(Dimension saved, Regenerator.Result reference, String version, Path out) throws IOException {
+	private static Outcome write(Dimension saved, Regenerator.Result reference, String version, Path out, long minInhabited)
+			throws IOException {
 		Path diffFile = out.resolve("overworld.diff.gz");
 		WorldDiff.Stats stats;
 		try (DiffFile.Writer writer = new DiffFile.Writer(diffFile)) {
-			stats = WorldDiff.diff(saved, reference.dimension(), Dimension.overworldRegions(reference.world()), writer);
+			stats = WorldDiff.diff(saved, reference.dimension(), Dimension.overworldRegions(reference.world()), minInhabited, writer);
 		}
 		Files.writeString(out.resolve("diff.json"), String.format("""
 				{
@@ -141,11 +151,12 @@ public final class Diff {
 				 "blocks": %d,
 				 "unsettledSaved": %d,
 				 "unsettledReference": %d,
+				 "unvisited": %d,
 				 "unreadable": %d,
 				 "serverRuns": %d
 				}
 				""", version.replace("\"", "\\\""), stats.savedChunks(), stats.compared(), stats.differing(), stats.blocks(),
-				stats.unsettledSaved(), stats.unsettledReference(), stats.unreadable().size(), reference.serverRuns()));
+				stats.unsettledSaved(), stats.unsettledReference(), stats.unvisited(), stats.unreadable().size(), reference.serverRuns()));
 		return new Outcome(diffFile, stats, reference);
 	}
 
@@ -171,7 +182,7 @@ public final class Diff {
 			System.err.println(problem);
 			System.err.println();
 		}
-		System.err.println("usage: past-echos diff [--version V] [--out DIR] [--heap SIZE] [--reference OLDER] WORLD");
+		System.err.println("usage: past-echos diff [--version V] [--out DIR] [--heap SIZE] [--reference OLDER] [--min-inhabited TICKS] WORLD");
 		System.err.println();
 		System.err.println("  WORLD        a world folder (the one holding level.dat), or a zip holding one");
 		System.err.println("  --version    the version that generated the world, when level.dat doesn't say");
@@ -179,6 +190,8 @@ public final class Diff {
 		System.err.println("  --heap       the regenerating server's heap (default 3G)");
 		System.err.println("  --reference  an untouched earlier copy of the world to diff against instead of a");
 		System.err.println("               regeneration: no noise and any version or mod, but chunks it lacks are skipped");
+		System.err.println("  --min-inhabited  skip chunks a player spent fewer ticks near (default " + MIN_INHABITED + ", a minute;");
+		System.err.println("               0 keeps all); worlds before 1.6 don't record it and keep every chunk");
 		System.err.println();
 		System.err.println("Without --reference, downloads Mojang's server jar for the version and runs it on this");
 		System.err.println("machine, which accepts the Minecraft EULA (https://aka.ms/MinecraftEULA) for that server.");

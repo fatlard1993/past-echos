@@ -38,6 +38,12 @@ tasks.register('regenTest', Test) {
 	useJUnitPlatform {
 		includeTags 'regen'
 	}
+	// Each test regenerates a world; a tmpfs /tmp runs out.
+	def scratch = layout.buildDirectory.dir('regen-tmp').get().asFile
+	doFirst {
+		scratch.mkdirs()
+	}
+	systemProperty 'java.io.tmpdir', scratch
 	testLogging {
 		events 'passed', 'failed'
 	}

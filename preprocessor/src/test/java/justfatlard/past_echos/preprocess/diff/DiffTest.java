@@ -21,6 +21,7 @@ import justfatlard.past_echos.preprocess.world.Dimension;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -76,10 +77,26 @@ public class DiffTest {
 	void anEarlierCopyStandsInForTheRegeneration(@TempDir Path tmp) throws IOException {
 		try (FileSystem plain = FileSystems.newFileSystem(resource("worlds/1.12.2.zip"));
 				FileSystem built = FileSystems.newFileSystem(resource("worlds/1.12.2-built.zip"))) {
-			Diff.Outcome o = Diff.against(Diff.findWorld(built.getPath("/")), Diff.findWorld(plain.getPath("/")), "1.12.2", tmp);
+			Diff.Outcome o = Diff.against(Diff.findWorld(built.getPath("/")), Diff.findWorld(plain.getPath("/")), "1.12.2", tmp, 0);
 			assertEquals(manifest(built), lines(DiffFile.read(o.diffFile())));
 			assertEquals(0, o.stats().unsettledReference());
 			assertEquals(0, o.reference().serverRuns());
+		}
+	}
+
+	@ParameterizedTest(name = "{0}")
+	@CsvSource({"1.12.2, true", "1.2.5, false"})
+	void chunksNoPlayerSpentTimeInAreSkipped(String version, boolean recordsTime, @TempDir Path tmp) throws IOException {
+		try (FileSystem plain = FileSystems.newFileSystem(resource("worlds/" + version + ".zip"));
+				FileSystem built = FileSystems.newFileSystem(resource("worlds/" + version + "-built.zip"))) {
+			Path world = Diff.findWorld(built.getPath("/"));
+			Path reference = Diff.findWorld(plain.getPath("/"));
+			WorldDiff.Stats all = Diff.against(world, reference, version, tmp.resolve("all"), 0).stats();
+			WorldDiff.Stats visited = Diff.against(world, reference, version, tmp.resolve("visited"), Diff.MIN_INHABITED).stats();
+			// Generated with no player about: 1.12.2 records no time in any chunk, 1.2.5 records none at all.
+			assertTrue(all.compared() > 0, all.toString());
+			assertEquals(recordsTime ? 0 : all.compared(), visited.compared(), visited.toString());
+			assertEquals(recordsTime ? all.compared() : 0, visited.unvisited(), visited.toString());
 		}
 	}
 

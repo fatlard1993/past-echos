@@ -21,18 +21,25 @@ import justfatlard.past_echos.preprocess.world.RegionFile;
  */
 public final class WorldDiff {
 	public record Stats(int savedChunks, int compared, int differing, long blocks, int unsettledSaved, int unsettledReference,
-			List<RegionFile.Unreadable> unreadable) {
+			int unvisited, List<RegionFile.Unreadable> unreadable) {
 	}
 
 	private WorldDiff() {
 	}
 
 	public static Stats diff(Dimension saved, Dimension reference, Path referenceRegions, DiffFile.Writer out) throws IOException {
+		return diff(saved, reference, referenceRegions, 0, out);
+	}
+
+	/** Leaving out chunks players spent under minInhabited ticks near: nobody built there. */
+	public static Stats diff(Dimension saved, Dimension reference, Path referenceRegions, long minInhabited, DiffFile.Writer out)
+			throws IOException {
 		int compared = 0;
 		int differing = 0;
 		long blocks = 0;
 		int unsettledSaved = 0;
 		int unsettledReference = 0;
+		int unvisited = 0;
 		List<RegionFile.Unreadable> unreadable = new ArrayList<>(saved.unreadable);
 		unreadable.addAll(reference.unreadable);
 		for (Path file : saved.regionFiles) {
@@ -44,6 +51,10 @@ public final class WorldDiff {
 			for (Chunk s : RegionFile.read(file).chunks()) {
 				if (!saved.settled(s.x, s.z)) {
 					unsettledSaved++;
+					continue;
+				}
+				if (!saved.visited(s.x, s.z, minInhabited)) {
+					unvisited++;
 					continue;
 				}
 				Chunk r = ref.get(key(s.x, s.z));
@@ -60,7 +71,7 @@ public final class WorldDiff {
 				}
 			}
 		}
-		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, unsettledReference, unreadable);
+		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, unsettledReference, unvisited, unreadable);
 	}
 
 	private static long key(int x, int z) {

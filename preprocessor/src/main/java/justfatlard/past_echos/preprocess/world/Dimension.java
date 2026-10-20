@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -20,6 +21,7 @@ public final class Dimension {
 	public final List<Path> regionFiles;
 	public final List<RegionFile.Unreadable> unreadable = new ArrayList<>();
 	private final Map<Long, Byte> flags = new HashMap<>();
+	private final Map<Long, Long> inhabited = new HashMap<>();
 
 	private Dimension(List<Path> regionFiles) {
 		this.regionFiles = regionFiles;
@@ -32,12 +34,17 @@ public final class Dimension {
 	}
 
 	public static Dimension read(Path regionFolder) throws IOException {
+		return read(regionFolder, file -> true);
+	}
+
+	/** Only the region files the filter keeps: the chunks a long regeneration is waiting on, say. */
+	public static Dimension read(Path regionFolder, Predicate<Path> regions) throws IOException {
 		if (!Files.isDirectory(regionFolder)) {
 			return new Dimension(List.of());
 		}
 		List<Path> files;
 		try (Stream<Path> list = Files.list(regionFolder)) {
-			files = list.filter(RegionFile::isRegion).sorted().toList();
+			files = list.filter(RegionFile::isRegion).filter(regions).sorted().toList();
 		}
 		// A world converted to Anvil keeps its old .mcr files beside the .mca ones; Anvil is current.
 		if (files.stream().anyMatch(f -> f.toString().endsWith(".mca"))) {
@@ -48,6 +55,7 @@ public final class Dimension {
 			RegionFile.Contents contents = RegionFile.read(file);
 			for (Chunk c : contents.chunks()) {
 				d.flags.put(key(c.x, c.z), (byte) ((c.decorated() ? DECORATED : 0) | (c.hasStatus() ? HAS_STATUS : 0)));
+				c.inhabitedTime().ifPresent(t -> d.inhabited.put(key(c.x, c.z), t));
 			}
 			d.unreadable.addAll(contents.unreadable());
 		}
@@ -86,6 +94,15 @@ public final class Dimension {
 			return true;
 		}
 		return decorated(x - 1, z) && decorated(x, z - 1) && decorated(x - 1, z - 1);
+	}
+
+	/**
+	 * Whether a player spent at least this many ticks near the chunk, so could have built in it.
+	 * A chunk saved before 1.6 records no time and counts as visited.
+	 */
+	public boolean visited(int x, int z, long minTicks) {
+		Long t = inhabited.get(key(x, z));
+		return t == null || t >= minTicks;
 	}
 
 	private boolean decorated(int x, int z) {

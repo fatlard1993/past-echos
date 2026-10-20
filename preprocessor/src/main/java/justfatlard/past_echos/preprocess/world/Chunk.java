@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -65,6 +66,11 @@ public final class Chunk {
 	/** Whether the chunk records a generation status (1.13 on), rather than only TerrainPopulated. */
 	public boolean hasStatus() {
 		return level().get("Status") instanceof String;
+	}
+
+	/** Ticks a player spent near enough for the chunk to run, recorded from 1.6; empty before. */
+	public OptionalLong inhabitedTime() {
+		return Nbt.number(level(), "InhabitedTime").map(OptionalLong::of).orElse(OptionalLong.empty());
 	}
 
 	/** Block entities (signs, chests, banners) as saved, each placed by its world x, y and z. */
