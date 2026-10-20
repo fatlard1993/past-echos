@@ -31,8 +31,11 @@ public final class Diff {
 	public static final long MIN_INHABITED = 1200;
 	/** The diff over a sample of unvisited chunks, from which extraction learns the generator's own blocks. */
 	public static final String UNVISITED_FILE = "unvisited.diff.gz";
-	/** About this many unvisited chunks are sampled: enough to see a block one chunk in a hundred holds. */
-	static final int UNVISITED_SAMPLE = 3000;
+	/**
+	 * About this many unvisited chunks are sampled. At 3,000 a single village in the sample made
+	 * its doors and farmland look generated; at 10,000 villages come in about their usual share.
+	 */
+	static final int UNVISITED_SAMPLE = 10_000;
 	/** Sampled in squares this many chunks across, which regenerate at little more than their own cost. */
 	static final int PATCH = 4;
 

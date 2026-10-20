@@ -134,6 +134,30 @@ class ExtractTest {
 		assertEquals(0.0, Extract.covered(new Echo(0, 70, 0, 3, 3, 3, 12, 5023, palette, open, marks, List.of())));
 	}
 
+	/** A mod's ship, generated in three seas, and one player's two houses a street apart and a third far off. */
+	@Test
+	void structuresWithCopiesFarApartAreGenerated() {
+		Echo ship = boat(0, 0, 40, 30, 12);
+		List<Echo> echoes = List.of(ship, boat(1000, 0, 41, 30, 12), boat(0, 2000, 40, 29, 11),
+				boat(5000, 5000, 10, 60, 0), boat(5100, 5000, 10, 60, 0), boat(5000, 5200, 10, 60, 0));
+		List<Echo> kept = Extract.unrepeated(echoes);
+		assertEquals(echoes.subList(3, 6), kept, "the houses are nearer one another than copies need be");
+		assertEquals(List.of(ship), Extract.unrepeated(List.of(ship)));
+	}
+
+	/** An echo of planks, wool and fences, one block of each in a row, all evidence. */
+	private static Echo boat(int x, int z, int planks, int wool, int fences) {
+		String[] palette = {"spruce_planks", "white_wool", "dark_oak_fence[north=true]"};
+		int n = planks + wool + fences;
+		int[] states = new int[n];
+		byte[] marks = new byte[n];
+		for (int i = 0; i < n; i++) {
+			states[i] = i < planks ? 0 : i < planks + wool ? 1 : 2;
+			marks[i] = EchoFile.EVIDENCE;
+		}
+		return new Echo(x, 62, z, n, 1, 1, n, 5023, palette, states, marks, List.of());
+	}
+
 	@Test
 	void echoFileRoundTrips(@TempDir Path tmp) throws IOException {
 		Echo echo = new Echo(-5, 60, 7, 2, 1, 2, 12.5, 3700, new String[] {"air", "oak_planks", "glass"}, new int[] {0, 1, 2, 1},

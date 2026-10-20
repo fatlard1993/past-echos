@@ -112,6 +112,10 @@ public final class Vocabulary {
 		if (name.endsWith("_leaves")) {
 			return state.contains("persistent=true") ? Kind.BUILT : Kind.GROWTH;
 		}
+		// Leaves a mod adds (leaf stairs, slabs) carry the flag too: a tree grew them, a player placed none.
+		if (state.contains("persistent=false")) {
+			return Kind.GROWTH;
+		}
 		if (GROWTH.contains(name) || SPREADING.contains(name) || name.endsWith("_log") || name.endsWith("_sapling") || name.endsWith("_stem")
 				|| name.contains("coral")) {
 			return Kind.GROWTH;

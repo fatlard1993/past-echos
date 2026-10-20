@@ -54,6 +54,17 @@ public final class Extract {
 	public static final double MAX_COVERED = 0.5;
 	/** The widest echo the mod can place, ruling out noise that clusters across a whole region. */
 	public static final int MAX_SPAN = 240;
+	/**
+	 * How alike two echoes' placed blocks must be, as the cosine of their counts by block, to be
+	 * copies of one thing. The household world's pirate ships and boats were 0.95 to 1 alike in
+	 * any rotation, cloud kingdom ruins and village houses over 0.95; its players' builds had no
+	 * look-alike far off at all.
+	 */
+	public static final double COPY_LIKENESS = 0.95;
+	/** Copies nearer than this may be one player's row of houses. */
+	public static final int COPIES_APART = 256;
+	/** As many copies of one thing as make it a generated structure. */
+	public static final int COPIES = 3;
 
 	private Extract() {
 	}
@@ -112,12 +123,15 @@ public final class Extract {
 			}
 			Cut whole = cut(diff, evidence, Dimension.overworldRegions(root));
 			List<Echo> cut = whole.echoes();
-			List<Echo> echoes = cut.stream().filter(Extract::onSurface).toList();
+			List<Echo> unrepeated = unrepeated(cut);
+			List<Echo> echoes = unrepeated.stream().filter(Extract::onSurface).toList();
 			Path out = diffDir.resolve("echoes.gz");
 			EchoFile.write(out, version, echoes);
 			Files.writeString(diffDir.resolve("echoes.json"), summary(version, echoes));
-			int underground = cut.size() - echoes.size();
-			System.out.printf("%s: %,d %s%s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
+			int repeated = cut.size() - unrepeated.size();
+			int underground = unrepeated.size() - echoes.size();
+			System.out.printf("%s: %,d %s%s%s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
+					repeated > 0 ? String.format(", %,d copies of generated structures skipped", repeated) : "",
 					underground > 0 ? String.format(", %,d underground skipped", underground) : "",
 					whole.tooWide() > 0 ? String.format(", %,d wider than %d skipped", whole.tooWide(), MAX_SPAN) : "");
 			for (Echo e : echoes) {
@@ -141,7 +155,57 @@ public final class Extract {
 
 	/** The echoes in a diff above ground, cut from the saved world's region folder, highest score first. */
 	public static List<Echo> run(List<ChunkDiff> diff, Path savedRegions) throws IOException {
-		return cut(diff, savedRegions).stream().filter(Extract::onSurface).toList();
+		return unrepeated(cut(diff, savedRegions)).stream().filter(Extract::onSurface).toList();
+	}
+
+	/**
+	 * The echoes without {@link #COPIES} or more far-apart copies: those are a generated
+	 * structure the regeneration placed elsewhere or not at all, a mod's ship or village house.
+	 */
+	public static List<Echo> unrepeated(List<Echo> echoes) {
+		List<Map<String, Integer>> placed = echoes.stream().map(Extract::placed).toList();
+		List<Echo> kept = new ArrayList<>();
+		for (int i = 0; i < echoes.size(); i++) {
+			int copies = 1;
+			for (int j = 0; j < echoes.size() && copies < COPIES; j++) {
+				long dx = echoes.get(i).x() - echoes.get(j).x();
+				long dz = echoes.get(i).z() - echoes.get(j).z();
+				if (dx * dx + dz * dz > (long) COPIES_APART * COPIES_APART && likeness(placed.get(i), placed.get(j)) >= COPY_LIKENESS) {
+					copies++;
+				}
+			}
+			if (copies < COPIES) {
+				kept.add(echoes.get(i));
+			}
+		}
+		return kept;
+	}
+
+	/** The echo's evidence by block, air left out. */
+	private static Map<String, Integer> placed(Echo e) {
+		Map<String, Integer> counts = new HashMap<>();
+		for (int i = 0; i < e.marks().length; i++) {
+			String state = e.palette()[e.states()[i]];
+			if (e.marks()[i] == EchoFile.EVIDENCE && Vocabulary.kind(state) != Vocabulary.Kind.AIR) {
+				int bracket = state.indexOf('[');
+				counts.merge(bracket < 0 ? state : state.substring(0, bracket), 1, Integer::sum);
+			}
+		}
+		return counts;
+	}
+
+	private static double likeness(Map<String, Integer> a, Map<String, Integer> b) {
+		double dot = 0;
+		double na = 0;
+		double nb = 0;
+		for (Map.Entry<String, Integer> e : a.entrySet()) {
+			dot += (double) e.getValue() * b.getOrDefault(e.getKey(), 0);
+			na += (double) e.getValue() * e.getValue();
+		}
+		for (int v : b.values()) {
+			nb += (double) v * v;
+		}
+		return na == 0 || nb == 0 ? 0 : dot / Math.sqrt(na * nb);
 	}
 
 	public static boolean onSurface(Echo echo) {

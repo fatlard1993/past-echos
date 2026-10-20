@@ -21,6 +21,8 @@ class EvidenceTest {
 		assertEquals(Kind.BUILT, Vocabulary.kind("18:4"), "oak leaves a player placed");
 		assertEquals(Kind.GROWTH, Vocabulary.kind("oak_leaves[persistent=false,waterlogged=false]"));
 		assertEquals(Kind.BUILT, Vocabulary.kind("oak_leaves[persistent=true,waterlogged=false]"));
+		assertEquals(Kind.GROWTH, Vocabulary.kind("better-trees-justfatlard:pale_oak_leaf_stairs[distance=3,facing=west,persistent=false]"));
+		assertEquals(Kind.BUILT, Vocabulary.kind("better-trees-justfatlard:pale_oak_leaf_stairs[distance=3,facing=west,persistent=true]"));
 		assertEquals(Kind.GROUND, Vocabulary.kind("deepslate_diamond_ore"));
 		assertEquals(Kind.GROWTH, Vocabulary.kind("birch_log[axis=y]"));
 		assertEquals(Kind.STRUCTURE, Vocabulary.kind("66:1"), "rail");
@@ -73,34 +75,38 @@ class EvidenceTest {
 
 	/**
 	 * A mod's worldgen block the vanilla regeneration never makes is on the saved side only, so
-	 * looks placed; unvisited chunks hold it as densely as visited ones, and a player's block not.
+	 * looks placed; it is in about as many unvisited chunks as visited ones, and a player's block not.
 	 */
 	@Test
 	void blocksUnvisitedChunksGainAreGenerated() {
 		List<ChunkDiff> visited = new ArrayList<>();
 		for (int c = 0; c < 10; c++) {
 			List<Block> blocks = new ArrayList<>();
+			blocks.add(new Block(c * 16, 70, 0, "oak_leaves", "mod:grass_slab"));
 			for (int i = 0; i < 8; i++) {
-				blocks.add(new Block(c * 16 + i, 70, 0, "oak_leaves[persistent=false]", "mod:oak_leaf_stairs"));
 				blocks.add(new Block(c * 16 + i, 64, 0, "grass_block", "ladder"));
 			}
 			visited.add(new ChunkDiff(c, 0, blocks));
 		}
+		// Of 100 unvisited chunks, 60 have the mod's slabs, and a village's ladders are in 30.
 		List<ChunkDiff> unvisited = new ArrayList<>();
-		for (int c = 0; c < 20; c++) {
+		for (int c = 0; c < 60; c++) {
 			List<Block> blocks = new ArrayList<>();
 			for (int i = 0; i < 8; i++) {
-				blocks.add(new Block(c * 16 + i, 70, 0, "oak_leaves[persistent=false]", "mod:oak_leaf_stairs"));
+				blocks.add(new Block(c * 16 + i, 70, 0, "grass_block", "mod:grass_slab"));
 			}
-			// A village's ladder now and then: enough to count, far too sparse to be the generator's.
-			blocks.add(new Block(c * 16, 64, 0, "air", "ladder"));
+			if (c < 30) {
+				for (int i = 0; i < 40; i++) {
+					blocks.add(new Block(c * 16 + i % 16, 64 + i / 16, 0, "air", "ladder"));
+				}
+			}
 			unvisited.add(new ChunkDiff(c, 1, blocks));
 		}
-		Evidence learned = Evidence.of(visited, 10, new Evidence.Unvisited(unvisited, 40));
-		assertEquals(Set.of("mod:oak_leaf_stairs"), learned.generated());
-		assertEquals(0, learned.weight("oak_leaves", "mod:oak_leaf_stairs"));
-		assertEquals(Evidence.PLACED, learned.weight("air", "ladder"), "0.5 per unvisited chunk against 8 per visited one");
-		assertEquals(Evidence.PLACED, Evidence.of(visited).weight("oak_leaves", "mod:oak_leaf_stairs"), "without the sample it looks placed");
+		Evidence learned = Evidence.of(visited, 10, new Evidence.Unvisited(unvisited, 100));
+		assertEquals(Set.of("mod:grass_slab"), learned.generated());
+		assertEquals(0, learned.weight("grass_block", "mod:grass_slab"));
+		assertEquals(Evidence.PLACED, learned.weight("air", "ladder"), "in 30% of unvisited chunks against all visited ones, however many");
+		assertEquals(Evidence.PLACED, Evidence.of(visited).weight("grass_block", "mod:grass_slab"), "without the sample it looks placed");
 	}
 
 	/** An ocean ruin crumbles at random, so regeneration loses some bricks and gains others. */

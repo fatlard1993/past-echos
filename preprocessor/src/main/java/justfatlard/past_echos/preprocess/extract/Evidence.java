@@ -22,7 +22,8 @@ import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
  *
  * <p>A block the saved world's generator made but the regenerating one can't, a mod's worldgen,
  * is on the saved side only. Chunks no player spent time near show it: what they gained there,
- * the generator placed, about as densely as anywhere, where players' blocks crowd where they were.
+ * the generator placed, in about as many chunks as anywhere, where players' blocks crowd where
+ * they were.
  */
 public final class Evidence {
 	public static final double PLACED = 1;
@@ -44,13 +45,16 @@ public final class Evidence {
 	static final int MIN_GENERATED = 16;
 	/** And at least a quarter as many as on the saved side, where a player's own blocks pile up. */
 	static final int BALANCE = 4;
+	/** Sampled unvisited chunks a block must be in to count as generated: more than one village's worth. */
+	static final int MIN_UNVISITED_CHUNKS = 16;
 	/**
-	 * A built block counts as generated when it is at least this share as dense per chunk in
-	 * unvisited chunks as in visited ones. In the household world mods' leaf stairs, grass slabs
-	 * and clouds were 0.8 to 1 as dense, and village and castle bricks over half; the players'
-	 * farm, ladders and deepslate walls 0.1 to 0.2.
+	 * A built block counts as generated when the share of unvisited chunks holding it is at least
+	 * this much of the share of visited ones. In the household world mods' grass and stone slabs
+	 * were 0.9 to 1, clouds, sulfur and mushroom stairs 0.55 to 0.7; the blocks of players' farms,
+	 * houses and mines 0.04 to 0.26, and up to 0.53 in one 10,000-chunk sample of three. Mods'
+	 * biome-bound blocks, mud and bamboo slabs, were 0.24 to 0.35, so they are left to the rest.
 	 */
-	static final double UNVISITED_SHARE = 1.0 / 3;
+	static final double UNVISITED_SHARE = 0.5;
 
 	/**
 	 * A diff over a sample of chunks no player spent time near.
@@ -83,11 +87,15 @@ public final class Evidence {
 	 */
 	public static Evidence of(List<ChunkDiff> diff, int compared, Unvisited unvisited) {
 		Map<String, int[]> counts = new HashMap<>();
+		Map<String, Integer> visitedHolding = new HashMap<>();
 		for (ChunkDiff chunk : diff) {
+			Set<String> holds = new HashSet<>();
 			for (Block b : chunk.blocks()) {
 				counts.computeIfAbsent(name(b.reference()), n -> new int[2])[0]++;
 				counts.computeIfAbsent(name(b.saved()), n -> new int[2])[1]++;
+				holds.add(name(b.saved()));
 			}
+			holds.forEach(n -> visitedHolding.merge(n, 1, Integer::sum));
 		}
 		Set<String> generated = new HashSet<>();
 		counts.forEach((name, c) -> {
@@ -95,15 +103,13 @@ public final class Evidence {
 				generated.add(name);
 			}
 		});
-		Map<String, Integer> gained = new HashMap<>();
+		Map<String, Integer> unvisitedHolding = new HashMap<>();
 		for (ChunkDiff chunk : unvisited.diff()) {
-			for (Block b : chunk.blocks()) {
-				gained.merge(name(b.saved()), 1, Integer::sum);
-			}
+			chunk.blocks().stream().map(b -> name(b.saved())).distinct().forEach(n -> unvisitedHolding.merge(n, 1, Integer::sum));
 		}
-		gained.forEach((name, n) -> {
-			int visited = counts.containsKey(name) ? counts.get(name)[1] : 0;
-			if (n >= MIN_GENERATED && (double) n / unvisited.compared() >= UNVISITED_SHARE * visited / Math.max(compared, 1)) {
+		unvisitedHolding.forEach((name, n) -> {
+			double visited = (double) visitedHolding.getOrDefault(name, 0) / Math.max(compared, 1);
+			if (n >= MIN_UNVISITED_CHUNKS && (double) n / unvisited.compared() >= UNVISITED_SHARE * visited) {
 				generated.add(name);
 			}
 		});
