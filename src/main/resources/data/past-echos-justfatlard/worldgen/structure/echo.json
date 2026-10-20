@@ -5,5 +5,6 @@
   "step": "surface_structures",
   "terrain_adaptation": "beard_thin",
   "processors": "past-echos-justfatlard:weathered",
-  "max_slope": 6
+  "max_slope": 6,
+  "slope_per_chunk": 2
 }
