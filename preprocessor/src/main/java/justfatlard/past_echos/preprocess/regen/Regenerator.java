@@ -9,10 +9,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
@@ -119,21 +117,9 @@ public final class Regenerator {
 		}
 	}
 
-	/**
-	 * The batch's chunks still unsettled, reading only the regions they and their north-west
-	 * neighbours lie in rather than the whole world, which grows with every batch.
-	 */
+	/** The batch's chunks still unsettled, reading only their regions rather than the whole growing world. */
 	private static List<int[]> unsettledIn(Path world, List<int[]> batch) throws IOException {
-		Set<String> regions = new HashSet<>();
-		for (int[] c : batch) {
-			for (int[] n : new int[][] {{0, 0}, {-1, 0}, {0, -1}, {-1, -1}}) {
-				regions.add("r." + (c[0] + n[0] >> 5) + "." + (c[1] + n[1] >> 5) + ".");
-			}
-		}
-		Dimension reference = Dimension.read(Dimension.overworldRegions(world), file -> {
-			String name = file.getFileName().toString();
-			return regions.contains(name.substring(0, name.lastIndexOf('.') + 1));
-		});
+		Dimension reference = Dimension.read(Dimension.overworldRegions(world), Dimension.regionsHolding(batch));
 		return batch.stream().filter(c -> !reference.settled(c[0], c[1])).toList();
 	}
 

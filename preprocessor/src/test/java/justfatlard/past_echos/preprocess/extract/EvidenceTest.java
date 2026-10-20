@@ -71,6 +71,38 @@ class EvidenceTest {
 		assertEquals(Evidence.PLACED, Evidence.plain().weight("water", "sulfur"), "unknown blocks default to built");
 	}
 
+	/**
+	 * A mod's worldgen block the vanilla regeneration never makes is on the saved side only, so
+	 * looks placed; unvisited chunks hold it as densely as visited ones, and a player's block not.
+	 */
+	@Test
+	void blocksUnvisitedChunksGainAreGenerated() {
+		List<ChunkDiff> visited = new ArrayList<>();
+		for (int c = 0; c < 10; c++) {
+			List<Block> blocks = new ArrayList<>();
+			for (int i = 0; i < 8; i++) {
+				blocks.add(new Block(c * 16 + i, 70, 0, "oak_leaves[persistent=false]", "mod:oak_leaf_stairs"));
+				blocks.add(new Block(c * 16 + i, 64, 0, "grass_block", "ladder"));
+			}
+			visited.add(new ChunkDiff(c, 0, blocks));
+		}
+		List<ChunkDiff> unvisited = new ArrayList<>();
+		for (int c = 0; c < 20; c++) {
+			List<Block> blocks = new ArrayList<>();
+			for (int i = 0; i < 8; i++) {
+				blocks.add(new Block(c * 16 + i, 70, 0, "oak_leaves[persistent=false]", "mod:oak_leaf_stairs"));
+			}
+			// A village's ladder now and then: enough to count, far too sparse to be the generator's.
+			blocks.add(new Block(c * 16, 64, 0, "air", "ladder"));
+			unvisited.add(new ChunkDiff(c, 1, blocks));
+		}
+		Evidence learned = Evidence.of(visited, 10, new Evidence.Unvisited(unvisited, 40));
+		assertEquals(Set.of("mod:oak_leaf_stairs"), learned.generated());
+		assertEquals(0, learned.weight("oak_leaves", "mod:oak_leaf_stairs"));
+		assertEquals(Evidence.PLACED, learned.weight("air", "ladder"), "0.5 per unvisited chunk against 8 per visited one");
+		assertEquals(Evidence.PLACED, Evidence.of(visited).weight("oak_leaves", "mod:oak_leaf_stairs"), "without the sample it looks placed");
+	}
+
 	/** An ocean ruin crumbles at random, so regeneration loses some bricks and gains others. */
 	@Test
 	void blocksAClusterBothLosesAndGainsAreNoEvidence() {

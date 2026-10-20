@@ -6,8 +6,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 import justfatlard.past_echos.preprocess.regen.Regenerator;
 import justfatlard.past_echos.preprocess.regen.ServerJars;
@@ -23,8 +29,15 @@ public final class Diff {
 	private static final int LEVEL_SEARCH_DEPTH = 4;
 	/** A minute of a player nearby: less is a flyover, too short to have built anything. */
 	public static final long MIN_INHABITED = 1200;
+	/** The diff over a sample of unvisited chunks, from which extraction learns the generator's own blocks. */
+	public static final String UNVISITED_FILE = "unvisited.diff.gz";
+	/** About this many unvisited chunks are sampled: enough to see a block one chunk in a hundred holds. */
+	static final int UNVISITED_SAMPLE = 3000;
+	/** Sampled in squares this many chunks across, which regenerate at little more than their own cost. */
+	static final int PATCH = 4;
 
-	public record Outcome(Path diffFile, WorldDiff.Stats stats, Regenerator.Result reference) {
+	/** @param unvisitedCompared how many sampled unvisited chunks went into {@link #UNVISITED_FILE} */
+	public record Outcome(Path diffFile, WorldDiff.Stats stats, int unvisitedCompared, Regenerator.Result reference) {
 	}
 
 	private Diff() {
@@ -84,8 +97,11 @@ public final class Diff {
 			if (s.unsettledSaved() > 0) {
 				System.out.printf("  %,d saved chunks skipped: generation unfinished when saved%n", s.unsettledSaved());
 			}
-			if (s.unvisited() > 0) {
-				System.out.printf("  %,d chunks skipped: under %,d ticks of a player nearby%n", s.unvisited(), minInhabited);
+			if (s.excluded() > 0) {
+				System.out.printf("  %,d chunks skipped: under %,d ticks of a player nearby%n", s.excluded(), minInhabited);
+			}
+			if (o.unvisitedCompared() > 0) {
+				System.out.printf("  %,d of those sampled to learn the generator's own blocks%n", o.unvisitedCompared());
 			}
 			if (s.unsettledReference() > 0) {
 				System.out.printf("  %,d chunks skipped: %s%n", s.unsettledReference(),
@@ -116,9 +132,11 @@ public final class Diff {
 				needed.add(c);
 			}
 		}
+		List<int[]> sample = unvisitedSample(saved, minInhabited);
+		needed.addAll(sample);
 		Regenerator regenerator = new Regenerator(new ServerJars(ServerJars.defaultCache()), heap, progress);
 		Regenerator.Result reference = regenerator.regenerate(world, version, needed, out.resolve("reference"));
-		return write(saved, reference, version, out, minInhabited);
+		return write(world, saved, reference, version, out, minInhabited, sample);
 	}
 
 	/** Diffs against an untouched earlier copy of the world instead of a regeneration. */
@@ -132,15 +150,50 @@ public final class Diff {
 				unsettled.add(c);
 			}
 		}
-		return write(saved, new Regenerator.Result(referenceWorld, reference, unsettled, 0), version, out, minInhabited);
+		return write(world, saved, new Regenerator.Result(referenceWorld, reference, unsettled, 0), version, out, minInhabited,
+				unvisitedSample(saved, minInhabited));
 	}
 
-	private static Outcome write(Dimension saved, Regenerator.Result reference, String version, Path out, long minInhabited)
-			throws IOException {
+	/**
+	 * Settled chunks under minInhabited ticks, in whole patches picked at random but the same
+	 * each run, up to about {@link #UNVISITED_SAMPLE}. Empty when every chunk was visited.
+	 */
+	static List<int[]> unvisitedSample(Dimension saved, long minInhabited) {
+		Map<Long, List<int[]>> patches = new TreeMap<>();
+		for (int[] c : saved.positions()) {
+			if (saved.settled(c[0], c[1]) && !saved.visited(c[0], c[1], minInhabited)) {
+				patches.computeIfAbsent((long) Math.floorDiv(c[0], PATCH) << 32 | (Math.floorDiv(c[1], PATCH) & 0xFFFFFFFFL), p -> new ArrayList<>()).add(c);
+			}
+		}
+		List<List<int[]>> order = new ArrayList<>(patches.values());
+		Collections.shuffle(order, new Random(0));
+		List<int[]> sample = new ArrayList<>();
+		for (List<int[]> patch : order) {
+			if (sample.size() >= UNVISITED_SAMPLE) {
+				break;
+			}
+			sample.addAll(patch);
+		}
+		return sample;
+	}
+
+	private static Outcome write(Path world, Dimension saved, Regenerator.Result reference, String version, Path out, long minInhabited,
+			List<int[]> sample) throws IOException {
 		Path diffFile = out.resolve("overworld.diff.gz");
+		Path referenceRegions = Dimension.overworldRegions(reference.world());
 		WorldDiff.Stats stats;
 		try (DiffFile.Writer writer = new DiffFile.Writer(diffFile)) {
-			stats = WorldDiff.diff(saved, reference.dimension(), Dimension.overworldRegions(reference.world()), minInhabited, writer);
+			stats = WorldDiff.diff(saved, reference.dimension(), referenceRegions, (x, z) -> saved.visited(x, z, minInhabited), writer);
+		}
+		Set<Long> sampled = new HashSet<>();
+		sample.forEach(c -> sampled.add((long) c[0] << 32 | (c[1] & 0xFFFFFFFFL)));
+		int unvisitedCompared = 0;
+		if (!sample.isEmpty()) {
+			Dimension sampleRegions = Dimension.read(Dimension.overworldRegions(world), Dimension.regionsHolding(sample));
+			try (DiffFile.Writer writer = new DiffFile.Writer(out.resolve(UNVISITED_FILE))) {
+				unvisitedCompared = WorldDiff.diff(sampleRegions, reference.dimension(), referenceRegions,
+						(x, z) -> sampled.contains((long) x << 32 | (z & 0xFFFFFFFFL)), writer).compared();
+			}
 		}
 		Files.writeString(out.resolve("diff.json"), String.format("""
 				{
@@ -152,12 +205,13 @@ public final class Diff {
 				 "unsettledSaved": %d,
 				 "unsettledReference": %d,
 				 "unvisited": %d,
+				 "unvisitedCompared": %d,
 				 "unreadable": %d,
 				 "serverRuns": %d
 				}
 				""", version.replace("\"", "\\\""), stats.savedChunks(), stats.compared(), stats.differing(), stats.blocks(),
-				stats.unsettledSaved(), stats.unsettledReference(), stats.unvisited(), stats.unreadable().size(), reference.serverRuns()));
-		return new Outcome(diffFile, stats, reference);
+				stats.unsettledSaved(), stats.unsettledReference(), stats.excluded(), unvisitedCompared, stats.unreadable().size(), reference.serverRuns()));
+		return new Outcome(diffFile, stats, unvisitedCompared, reference);
 	}
 
 	/** The shallowest folder holding a level.dat. */

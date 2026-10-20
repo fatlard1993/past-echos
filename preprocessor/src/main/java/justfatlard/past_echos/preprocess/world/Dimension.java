@@ -4,9 +4,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -60,6 +63,23 @@ public final class Dimension {
 			d.unreadable.addAll(contents.unreadable());
 		}
 		return d;
+	}
+
+	/**
+	 * The region files holding these chunks and their west, north and north-west neighbours,
+	 * which a numeric-id chunk needs to count as settled.
+	 */
+	public static Predicate<Path> regionsHolding(Collection<int[]> chunks) {
+		Set<String> regions = new HashSet<>();
+		for (int[] c : chunks) {
+			for (int[] n : new int[][] {{0, 0}, {-1, 0}, {0, -1}, {-1, -1}}) {
+				regions.add("r." + (c[0] + n[0] >> 5) + "." + (c[1] + n[1] >> 5) + ".");
+			}
+		}
+		return file -> {
+			String name = file.getFileName().toString();
+			return regions.contains(name.substring(0, name.lastIndexOf('.') + 1));
+		};
 	}
 
 	static long key(int x, int z) {

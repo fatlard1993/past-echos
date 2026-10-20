@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.function.BiPredicate;
 import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
 import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
 import justfatlard.past_echos.preprocess.world.Chunk;
@@ -21,25 +22,25 @@ import justfatlard.past_echos.preprocess.world.RegionFile;
  */
 public final class WorldDiff {
 	public record Stats(int savedChunks, int compared, int differing, long blocks, int unsettledSaved, int unsettledReference,
-			int unvisited, List<RegionFile.Unreadable> unreadable) {
+			int excluded, List<RegionFile.Unreadable> unreadable) {
 	}
 
 	private WorldDiff() {
 	}
 
 	public static Stats diff(Dimension saved, Dimension reference, Path referenceRegions, DiffFile.Writer out) throws IOException {
-		return diff(saved, reference, referenceRegions, 0, out);
+		return diff(saved, reference, referenceRegions, (x, z) -> true, out);
 	}
 
-	/** Leaving out chunks players spent under minInhabited ticks near: nobody built there. */
-	public static Stats diff(Dimension saved, Dimension reference, Path referenceRegions, long minInhabited, DiffFile.Writer out)
-			throws IOException {
+	/** Over the settled chunks the filter takes; the rest count as excluded. */
+	public static Stats diff(Dimension saved, Dimension reference, Path referenceRegions, BiPredicate<Integer, Integer> include,
+			DiffFile.Writer out) throws IOException {
 		int compared = 0;
 		int differing = 0;
 		long blocks = 0;
 		int unsettledSaved = 0;
 		int unsettledReference = 0;
-		int unvisited = 0;
+		int excluded = 0;
 		List<RegionFile.Unreadable> unreadable = new ArrayList<>(saved.unreadable);
 		unreadable.addAll(reference.unreadable);
 		for (Path file : saved.regionFiles) {
@@ -53,8 +54,8 @@ public final class WorldDiff {
 					unsettledSaved++;
 					continue;
 				}
-				if (!saved.visited(s.x, s.z, minInhabited)) {
-					unvisited++;
+				if (!include.test(s.x, s.z)) {
+					excluded++;
 					continue;
 				}
 				Chunk r = ref.get(key(s.x, s.z));
@@ -71,7 +72,7 @@ public final class WorldDiff {
 				}
 			}
 		}
-		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, unsettledReference, unvisited, unreadable);
+		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, unsettledReference, excluded, unreadable);
 	}
 
 	private static long key(int x, int z) {

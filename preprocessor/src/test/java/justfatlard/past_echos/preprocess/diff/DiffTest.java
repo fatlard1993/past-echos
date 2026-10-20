@@ -92,11 +92,15 @@ public class DiffTest {
 			Path world = Diff.findWorld(built.getPath("/"));
 			Path reference = Diff.findWorld(plain.getPath("/"));
 			WorldDiff.Stats all = Diff.against(world, reference, version, tmp.resolve("all"), 0).stats();
-			WorldDiff.Stats visited = Diff.against(world, reference, version, tmp.resolve("visited"), Diff.MIN_INHABITED).stats();
+			Diff.Outcome o = Diff.against(world, reference, version, tmp.resolve("visited"), Diff.MIN_INHABITED);
+			WorldDiff.Stats visited = o.stats();
 			// Generated with no player about: 1.12.2 records no time in any chunk, 1.2.5 records none at all.
 			assertTrue(all.compared() > 0, all.toString());
 			assertEquals(recordsTime ? 0 : all.compared(), visited.compared(), visited.toString());
-			assertEquals(recordsTime ? all.compared() : 0, visited.unvisited(), visited.toString());
+			assertEquals(recordsTime ? all.compared() : 0, visited.excluded(), visited.toString());
+			// So few chunks that the sample takes them all.
+			assertEquals(recordsTime ? all.compared() : 0, o.unvisitedCompared());
+			assertEquals(recordsTime, Files.exists(tmp.resolve("visited").resolve(Diff.UNVISITED_FILE)));
 		}
 	}
 

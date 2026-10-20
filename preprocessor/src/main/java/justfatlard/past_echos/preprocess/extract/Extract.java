@@ -52,6 +52,8 @@ public final class Extract {
 	 * tunnels are left for later: a torch-lit branch mine passes every other test.
 	 */
 	public static final double MAX_COVERED = 0.5;
+	/** The widest echo the mod can place, ruling out noise that clusters across a whole region. */
+	public static final int MAX_SPAN = 240;
 
 	private Extract() {
 	}
@@ -93,18 +95,31 @@ public final class Extract {
 		@SuppressWarnings("unchecked")
 		Map<String, Object> info = (Map<String, Object>) Json.parse(Files.readString(diffDir.resolve("diff.json")));
 		String version = (String) info.get("version");
+		Path unvisitedFile = diffDir.resolve(Diff.UNVISITED_FILE);
+		Evidence.Unvisited unvisited = Files.exists(unvisitedFile) && info.get("unvisitedCompared") instanceof Number n
+				? new Evidence.Unvisited(DiffFile.read(unvisitedFile), n.intValue())
+				: Evidence.Unvisited.NONE;
+		int compared = ((Number) info.get("compared")).intValue();
 
 		FileSystem zip = world.toString().endsWith(".zip") ? FileSystems.newFileSystem(world) : null;
 		try {
 			Path root = zip == null ? world : Diff.findWorld(zip.getPath("/"));
-			List<Echo> cut = cut(DiffFile.read(diffFile), Dimension.overworldRegions(root));
+			List<ChunkDiff> diff = DiffFile.read(diffFile);
+			Evidence evidence = Evidence.of(diff, compared, unvisited);
+			if (unvisited.compared() > 0) {
+				System.out.printf("learned from %,d unvisited chunks; generated: %s%n", unvisited.compared(),
+						evidence.generated().stream().sorted().collect(Collectors.joining(", ")));
+			}
+			Cut whole = cut(diff, evidence, Dimension.overworldRegions(root));
+			List<Echo> cut = whole.echoes();
 			List<Echo> echoes = cut.stream().filter(Extract::onSurface).toList();
 			Path out = diffDir.resolve("echoes.gz");
 			EchoFile.write(out, version, echoes);
 			Files.writeString(diffDir.resolve("echoes.json"), summary(version, echoes));
 			int underground = cut.size() - echoes.size();
-			System.out.printf("%s: %,d %s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
-					underground > 0 ? String.format(", %,d underground skipped", underground) : "");
+			System.out.printf("%s: %,d %s%s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
+					underground > 0 ? String.format(", %,d underground skipped", underground) : "",
+					whole.tooWide() > 0 ? String.format(", %,d wider than %d skipped", whole.tooWide(), MAX_SPAN) : "");
 			for (Echo e : echoes) {
 				System.out.printf("  %6.1f  %dx%dx%d at %d,%d,%d  %s%n", e.score(), e.sizeX(), e.sizeY(), e.sizeZ(), e.x(), e.y(), e.z(),
 						topEvidence(e, 4).entrySet().stream().map(t -> t.getValue() + " " + t.getKey()).collect(Collectors.joining(", ")));
@@ -164,8 +179,16 @@ public final class Extract {
 
 	/** Every echo in a diff, underground ones too, highest score first. */
 	public static List<Echo> cut(List<ChunkDiff> diff, Path savedRegions) throws IOException {
-		Evidence evidence = Evidence.of(diff);
-		List<Box> boxes = merge(accepted(diff, evidence).stream().map(Box::of).toList());
+		return cut(diff, Evidence.of(diff), savedRegions).echoes();
+	}
+
+	/** The echoes, and how many clusters were too wide to place and so not cut. */
+	public record Cut(List<Echo> echoes, int tooWide) {
+	}
+
+	public static Cut cut(List<ChunkDiff> diff, Evidence evidence, Path savedRegions) throws IOException {
+		List<Box> all = merge(accepted(diff, evidence).stream().map(Box::of).toList());
+		List<Box> boxes = all.stream().filter(b -> b.maxX - b.minX < MAX_SPAN && b.maxZ - b.minZ < MAX_SPAN).toList();
 		Map<Long, ChunkDiff> diffByChunk = new HashMap<>();
 		diff.forEach(c -> diffByChunk.put(chunkKey(c.x(), c.z()), c));
 		Map<String, Path> regionFiles = regionFiles(savedRegions);
@@ -203,7 +226,8 @@ public final class Extract {
 				}
 			}
 		}
-		return cuttings.stream().map(Cutting::echo).sorted((a, b) -> Double.compare(b.score(), a.score())).toList();
+		return new Cut(cuttings.stream().map(Cutting::echo).sorted((a, b) -> Double.compare(b.score(), a.score())).toList(),
+				all.size() - boxes.size());
 	}
 
 	/** A cluster's span with the margin around it. Clusters whose boxes touch become one. */

@@ -1,6 +1,7 @@
 package justfatlard.past_echos.preprocess.extract;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,6 +19,10 @@ import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
  * blocks are not. So a diff also says which blocks its generator makes: regeneration noise is
  * symmetric, putting a generated block on the reference side about as often as the saved side,
  * where players' blocks are nearly all on the saved side.
+ *
+ * <p>A block the saved world's generator made but the regenerating one can't, a mod's worldgen,
+ * is on the saved side only. Chunks no player spent time near show it: what they gained there,
+ * the generator placed, about as densely as anywhere, where players' blocks crowd where they were.
  */
 public final class Evidence {
 	public static final double PLACED = 1;
@@ -39,6 +44,22 @@ public final class Evidence {
 	static final int MIN_GENERATED = 16;
 	/** And at least a quarter as many as on the saved side, where a player's own blocks pile up. */
 	static final int BALANCE = 4;
+	/**
+	 * A built block counts as generated when it is at least this share as dense per chunk in
+	 * unvisited chunks as in visited ones. In the household world mods' leaf stairs, grass slabs
+	 * and clouds were 0.8 to 1 as dense, and village and castle bricks over half; the players'
+	 * farm, ladders and deepslate walls 0.1 to 0.2.
+	 */
+	static final double UNVISITED_SHARE = 1.0 / 3;
+
+	/**
+	 * A diff over a sample of chunks no player spent time near.
+	 *
+	 * @param compared how many chunks the sample compared, those that differ and those that don't
+	 */
+	public record Unvisited(List<ChunkDiff> diff, int compared) {
+		public static final Unvisited NONE = new Unvisited(List.of(), 0);
+	}
 
 	private final Set<String> generated;
 
@@ -53,6 +74,14 @@ public final class Evidence {
 
 	/** Weights for one diff, its generated blocks learned from it. */
 	public static Evidence of(List<ChunkDiff> diff) {
+		return of(diff, 0, Unvisited.NONE);
+	}
+
+	/**
+	 * Weights for one diff over compared chunks, its generated blocks learned from it and from
+	 * the unvisited sample.
+	 */
+	public static Evidence of(List<ChunkDiff> diff, int compared, Unvisited unvisited) {
 		Map<String, int[]> counts = new HashMap<>();
 		for (ChunkDiff chunk : diff) {
 			for (Block b : chunk.blocks()) {
@@ -60,10 +89,25 @@ public final class Evidence {
 				counts.computeIfAbsent(name(b.saved()), n -> new int[2])[1]++;
 			}
 		}
-		return new Evidence(counts.entrySet().stream()
-				.filter(e -> e.getValue()[0] >= MIN_GENERATED && e.getValue()[0] * BALANCE >= e.getValue()[1])
-				.map(Map.Entry::getKey)
-				.collect(Collectors.toUnmodifiableSet()));
+		Set<String> generated = new HashSet<>();
+		counts.forEach((name, c) -> {
+			if (c[0] >= MIN_GENERATED && c[0] * BALANCE >= c[1]) {
+				generated.add(name);
+			}
+		});
+		Map<String, Integer> gained = new HashMap<>();
+		for (ChunkDiff chunk : unvisited.diff()) {
+			for (Block b : chunk.blocks()) {
+				gained.merge(name(b.saved()), 1, Integer::sum);
+			}
+		}
+		gained.forEach((name, n) -> {
+			int visited = counts.containsKey(name) ? counts.get(name)[1] : 0;
+			if (n >= MIN_GENERATED && (double) n / unvisited.compared() >= UNVISITED_SHARE * visited / Math.max(compared, 1)) {
+				generated.add(name);
+			}
+		});
+		return new Evidence(Set.copyOf(generated));
 	}
 
 	/** The built-looking blocks this diff shows the generator making. */
