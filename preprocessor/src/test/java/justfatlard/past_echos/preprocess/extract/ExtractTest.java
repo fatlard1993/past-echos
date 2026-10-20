@@ -111,6 +111,29 @@ class ExtractTest {
 		}
 	}
 
+	/** A torch-lit tunnel under stone is a mine and no echo yet; the same work in the open is. */
+	@Test
+	void minesAreUnderground() {
+		// 3x3 columns, 3 high: y0 floor of stone, y1 dug air with a torch in the middle, y2 stone or air.
+		String[] palette = {"stone", "air", "wall_torch[facing=north]"};
+		int[] states = new int[27];
+		byte[] marks = new byte[27];
+		for (int i = 9; i < 18; i++) {
+			states[i] = 1;
+			marks[i] = EchoFile.EVIDENCE;
+		}
+		states[13] = 2;
+		Echo mine = new Echo(0, -60, 0, 3, 3, 3, 12, 5023, palette, states, marks, List.of());
+		assertEquals(1.0, Extract.covered(mine));
+		assertTrue(!Extract.onSurface(mine));
+
+		int[] open = states.clone();
+		for (int i = 18; i < 27; i++) {
+			open[i] = 1;
+		}
+		assertEquals(0.0, Extract.covered(new Echo(0, 70, 0, 3, 3, 3, 12, 5023, palette, open, marks, List.of())));
+	}
+
 	@Test
 	void echoFileRoundTrips(@TempDir Path tmp) throws IOException {
 		Echo echo = new Echo(-5, 60, 7, 2, 1, 2, 12.5, 3700, new String[] {"air", "oak_planks", "glass"}, new int[] {0, 1, 2, 1},

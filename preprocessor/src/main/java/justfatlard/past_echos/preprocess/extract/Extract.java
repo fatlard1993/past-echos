@@ -47,6 +47,11 @@ public final class Extract {
 	public static final double MAX_DOMINANCE = 0.8;
 	/** Terrain kept around each echo's evidence, on every side. */
 	public static final int MARGIN = 1;
+	/**
+	 * The largest share of an echo's worked columns that may lie under natural ground. Mines and
+	 * tunnels are left for later: a torch-lit branch mine passes every other test.
+	 */
+	public static final double MAX_COVERED = 0.5;
 
 	private Extract() {
 	}
@@ -92,11 +97,14 @@ public final class Extract {
 		FileSystem zip = world.toString().endsWith(".zip") ? FileSystems.newFileSystem(world) : null;
 		try {
 			Path root = zip == null ? world : Diff.findWorld(zip.getPath("/"));
-			List<Echo> echoes = run(DiffFile.read(diffFile), Dimension.overworldRegions(root));
+			List<Echo> cut = cut(DiffFile.read(diffFile), Dimension.overworldRegions(root));
+			List<Echo> echoes = cut.stream().filter(Extract::onSurface).toList();
 			Path out = diffDir.resolve("echoes.gz");
 			EchoFile.write(out, version, echoes);
 			Files.writeString(diffDir.resolve("echoes.json"), summary(version, echoes));
-			System.out.printf("%s: %,d %s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes");
+			int underground = cut.size() - echoes.size();
+			System.out.printf("%s: %,d %s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
+					underground > 0 ? String.format(", %,d underground skipped", underground) : "");
 			for (Echo e : echoes) {
 				System.out.printf("  %6.1f  %dx%dx%d at %d,%d,%d  %s%n", e.score(), e.sizeX(), e.sizeY(), e.sizeZ(), e.x(), e.y(), e.z(),
 						topEvidence(e, 4).entrySet().stream().map(t -> t.getValue() + " " + t.getKey()).collect(Collectors.joining(", ")));
@@ -116,8 +124,46 @@ public final class Extract {
 				.toList();
 	}
 
-	/** The echoes in a diff, cut from the saved world's region folder, highest score first. */
+	/** The echoes in a diff above ground, cut from the saved world's region folder, highest score first. */
 	public static List<Echo> run(List<ChunkDiff> diff, Path savedRegions) throws IOException {
+		return cut(diff, savedRegions).stream().filter(Extract::onSurface).toList();
+	}
+
+	public static boolean onSurface(Echo echo) {
+		return covered(echo) <= MAX_COVERED;
+	}
+
+	/**
+	 * The share of an echo's worked columns where, looking down from the top, natural ground comes
+	 * before the player's work. Plants, trees and water are looked through.
+	 */
+	public static double covered(Echo e) {
+		int worked = 0;
+		int covered = 0;
+		for (int z = 0; z < e.sizeZ(); z++) {
+			for (int x = 0; x < e.sizeX(); x++) {
+				for (int y = e.sizeY() - 1; y >= 0; y--) {
+					if (e.mark(x, y, z) == EchoFile.EVIDENCE) {
+						worked++;
+						break;
+					}
+					if (Vocabulary.kind(e.state(x, y, z)) == Vocabulary.Kind.GROUND) {
+						boolean below = false;
+						for (int b = y - 1; b >= 0 && !below; b--) {
+							below = e.mark(x, b, z) == EchoFile.EVIDENCE;
+						}
+						worked += below ? 1 : 0;
+						covered += below ? 1 : 0;
+						break;
+					}
+				}
+			}
+		}
+		return worked == 0 ? 0 : (double) covered / worked;
+	}
+
+	/** Every echo in a diff, underground ones too, highest score first. */
+	public static List<Echo> cut(List<ChunkDiff> diff, Path savedRegions) throws IOException {
 		Evidence evidence = Evidence.of(diff);
 		List<Box> boxes = merge(accepted(diff, evidence).stream().map(Box::of).toList());
 		Map<Long, ChunkDiff> diffByChunk = new HashMap<>();
