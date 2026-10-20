@@ -1,0 +1,9 @@
+{
+  "type": "past-echos-justfatlard:echo",
+  "biomes": "#past-echos-justfatlard:has_structure/echo",
+  "spawn_overrides": {},
+  "step": "surface_structures",
+  "terrain_adaptation": "beard_thin",
+  "processors": "past-echos-justfatlard:weathered",
+  "max_slope": 6
+}

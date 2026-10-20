@@ -210,6 +210,7 @@ public final class Extract {
 		final byte[] marks;
 		final List<Map<String, Object>> blockEntities = new ArrayList<>();
 		final Evidence evidence;
+		int dataVersion = EchoFile.NO_DATA_VERSION;
 
 		Cutting(Box box, Evidence evidence) {
 			this.box = box;
@@ -234,6 +235,9 @@ public final class Extract {
 			int z1 = Math.min(box.maxZ, chunk.z * 16 + 15);
 			if (x0 > x1 || z0 > z1) {
 				return;
+			}
+			if (chunk.dataVersion != null) {
+				dataVersion = Math.max(dataVersion, chunk.dataVersion);
 			}
 			for (Map.Entry<Integer, Chunk.Section> e : chunk.sections().entrySet()) {
 				int y0 = Math.max(box.minY, e.getKey() * 16);
@@ -268,7 +272,7 @@ public final class Extract {
 		}
 
 		Echo echo() {
-			return new Echo(box.minX, box.minY, box.minZ, sizeX, sizeY, sizeZ, box.score, palette.keySet().toArray(String[]::new), states, marks,
+			return new Echo(box.minX, box.minY, box.minZ, sizeX, sizeY, sizeZ, box.score, dataVersion, palette.keySet().toArray(String[]::new), states, marks,
 					blockEntities);
 		}
 	}
@@ -291,8 +295,8 @@ public final class Extract {
 		for (int i = 0; i < echoes.size(); i++) {
 			Echo e = echoes.get(i);
 			json.append(i == 0 ? "\n" : ",\n").append(String.format(
-					"  {\"x\": %d, \"y\": %d, \"z\": %d, \"size\": [%d, %d, %d], \"score\": %.1f, \"evidence\": %d, \"changed\": %d, \"blockEntities\": %d, \"top\": {%s}}",
-					e.x(), e.y(), e.z(), e.sizeX(), e.sizeY(), e.sizeZ(), e.score(), e.count(EchoFile.EVIDENCE), e.count(EchoFile.CHANGED),
+					"  {\"x\": %d, \"y\": %d, \"z\": %d, \"size\": [%d, %d, %d], \"score\": %.1f, \"dataVersion\": %d, \"evidence\": %d, \"changed\": %d, \"blockEntities\": %d, \"top\": {%s}}",
+					e.x(), e.y(), e.z(), e.sizeX(), e.sizeY(), e.sizeZ(), e.score(), e.dataVersion(), e.count(EchoFile.EVIDENCE), e.count(EchoFile.CHANGED),
 					e.blockEntities().size(),
 					topEvidence(e, 5).entrySet().stream().map(t -> "\"" + t.getKey().replace("\"", "\\\"") + "\": " + t.getValue())
 							.collect(Collectors.joining(", "))));

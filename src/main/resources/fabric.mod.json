@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "past-echos-justfatlard",
+  "version": "${version}",
+  "name": "Past Echos",
+  "description": "What you built in your old worlds turns up as weathered ruins in the new one",
+  "authors": [
+    "justfatlard"
+  ],
+  "contact": {
+    "sources": "https://github.com/fatlard1993/past-echos"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "justfatlard.past_echos.PastEchos"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loaderVersion}",
+    "fabric-api": "${fabricApiVersion}",
+    "minecraft": "${minecraftDependency}",
+    "java": ">=25"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "overview": [
+    "What you built in your old worlds turns up as weathered ruins in the new one."
+  ],
+  "versions": {
+    "0.1.0": [
+      "Builds found in old worlds by the past-echos preprocessor stand as ruins on dry, level ground.",
+      "Worlds from 1.2.5 to 26.3 are read, their blocks and signs brought up to date.",
+      "Ruins weather: cracked and mossy stone, broken glass, burnt-out torches, missing blocks."
+    ]
+  }
+}

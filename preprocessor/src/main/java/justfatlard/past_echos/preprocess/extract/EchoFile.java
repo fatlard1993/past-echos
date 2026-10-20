@@ -18,12 +18,12 @@ import justfatlard.past_echos.preprocess.world.Nbt;
 
 /**
  * Echoes cut from one world, gzipped: "PEECHO" and a format byte, the version whose block states
- * they use, then per echo its corner, size, score, palette, each position's state and mark in YZX
- * order, and its block entities as NBT.
+ * they use, then per echo its corner, size, score, data version, palette, each position's state and
+ * mark in YZX order, and its block entities as NBT.
  */
 public final class EchoFile {
 	private static final byte[] MAGIC = {'P', 'E', 'E', 'C', 'H', 'O'};
-	private static final int FORMAT = 1;
+	private static final int FORMAT = 2;
 
 	/** The saved block matches the regenerated one: terrain the build stood on or in. */
 	public static final byte TERRAIN = 0;
@@ -31,12 +31,15 @@ public final class EchoFile {
 	public static final byte CHANGED = 1;
 	/** The saved block is a player's work. */
 	public static final byte EVIDENCE = 2;
+	/** The data version of chunks saved before 1.9, which recorded none. */
+	public static final int NO_DATA_VERSION = -1;
 
 	/**
 	 * A box of the saved world, its corner at x, y, z. Positions index as (y * sizeZ + z) * sizeX + x.
-	 * Block entities are as the version saved them, but with x, y and z from the corner.
+	 * Block entities are as the version saved them, but with x, y and z from the corner, and the data
+	 * version is the one their chunks were saved under.
 	 */
-	public record Echo(int x, int y, int z, int sizeX, int sizeY, int sizeZ, double score, String[] palette, int[] states, byte[] marks,
+	public record Echo(int x, int y, int z, int sizeX, int sizeY, int sizeZ, double score, int dataVersion, String[] palette, int[] states, byte[] marks,
 			List<Map<String, Object>> blockEntities) {
 		public int index(int dx, int dy, int dz) {
 			return (dy * sizeZ + dz) * sizeX + dx;
@@ -83,6 +86,7 @@ public final class EchoFile {
 				varint(out, e.sizeY);
 				varint(out, e.sizeZ);
 				out.writeDouble(e.score);
+				out.writeInt(e.dataVersion);
 				varint(out, e.palette.length);
 				for (String s : e.palette) {
 					out.writeUTF(s);
@@ -117,6 +121,7 @@ public final class EchoFile {
 				int sy = varint(in);
 				int sz = varint(in);
 				double score = in.readDouble();
+				int dataVersion = in.readInt();
 				String[] palette = new String[varint(in)];
 				for (int p = 0; p < palette.length; p++) {
 					palette[p] = in.readUTF();
@@ -130,7 +135,7 @@ public final class EchoFile {
 				for (int b = varint(in); b > 0; b--) {
 					entities.add(Nbt.read(in.readNBytes(varint(in)), ByteOrder.BIG_ENDIAN));
 				}
-				echoes.add(new Echo(x, y, z, sx, sy, sz, score, palette, states, marks, entities));
+				echoes.add(new Echo(x, y, z, sx, sy, sz, score, dataVersion, palette, states, marks, entities));
 			}
 			return new Contents(version, echoes);
 		}

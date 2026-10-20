@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Extraction over real stage-one output (fixtures/diffs.py). diffs/VERSION-built is each built
@@ -41,15 +41,17 @@ class ExtractTest {
 		}
 	}
 
+	/** Each version with the data version its chunks are saved under, none before 1.9. */
 	@ParameterizedTest(name = "{0}")
-	@ValueSource(strings = {"1.2.5", "1.6.4", "1.8.9", "1.12.2", "1.16.5", "1.18.2", "1.20.4", "26.3"})
-	void theHutIsTheOneEcho(String version) throws IOException {
+	@CsvSource({"1.2.5, -1", "1.6.4, -1", "1.8.9, -1", "1.12.2, 1343", "1.16.5, 2586", "1.18.2, 2975", "1.20.4, 3700", "26.3, 5023"})
+	void theHutIsTheOneEcho(String version, int dataVersion) throws IOException {
 		try (FileSystem built = FileSystems.newFileSystem(DiffTest.resource("worlds/" + version + "-built.zip"))) {
 			Path regions = Dimension.overworldRegions(Diff.findWorld(built.getPath("/")));
 			List<Echo> echoes = Extract.run(DiffFile.read(DiffTest.resource("diffs/" + version + "-built.diff.gz")), regions);
 			// The tunnel is earthwork alone, which regeneration's lakes match in size, so it is no echo.
 			assertEquals(1, echoes.size(), () -> "echoes: " + echoes.stream().map(e -> e.x() + "," + e.y() + "," + e.z()).toList());
 			Echo hut = echoes.getFirst();
+			assertEquals(dataVersion, hut.dataVersion());
 
 			int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
 			int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
@@ -111,7 +113,7 @@ class ExtractTest {
 
 	@Test
 	void echoFileRoundTrips(@TempDir Path tmp) throws IOException {
-		Echo echo = new Echo(-5, 60, 7, 2, 1, 2, 12.5, new String[] {"air", "oak_planks", "glass"}, new int[] {0, 1, 2, 1},
+		Echo echo = new Echo(-5, 60, 7, 2, 1, 2, 12.5, 3700, new String[] {"air", "oak_planks", "glass"}, new int[] {0, 1, 2, 1},
 				new byte[] {EchoFile.TERRAIN, EchoFile.EVIDENCE, EchoFile.EVIDENCE, EchoFile.CHANGED},
 				List.of(Map.of("id", "minecraft:sign", "x", 1, "y", 0, "z", 1, "front_text", Map.of("messages", List.of("hello", "", "", "")))));
 		Path file = tmp.resolve("echoes.gz");
@@ -121,6 +123,7 @@ class ExtractTest {
 		Echo back = read.echoes().getFirst();
 		assertEquals(List.of(-5, 60, 7, 2, 1, 2), List.of(back.x(), back.y(), back.z(), back.sizeX(), back.sizeY(), back.sizeZ()));
 		assertEquals(12.5, back.score());
+		assertEquals(3700, back.dataVersion());
 		assertArrayEquals(echo.palette(), back.palette());
 		assertArrayEquals(echo.states(), back.states());
 		assertArrayEquals(echo.marks(), back.marks());
