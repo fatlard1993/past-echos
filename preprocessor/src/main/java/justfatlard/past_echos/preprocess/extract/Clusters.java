@@ -8,7 +8,6 @@ import java.util.Map;
 import java.util.Set;
 import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
 import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
-import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
 
 /**
  * Groups the differing blocks that carry evidence into clusters: blocks within {@link #REACH} of
@@ -25,13 +24,8 @@ public final class Clusters {
 	 * structure blocks. A block the cluster both loses and gains counts in none of them: that is
 	 * a structure regenerated differently, as ocean ruins crumble at random, where a player's
 	 * blocks are only ever gained.
-	 *
-	 * <p>Rebuilt counts the built-looking blocks the regeneration has in the cluster's span where
-	 * the saved world has none: where a mod's villages replace the regenerating generator's, the
-	 * span holds a whole village on each side, where a player built on what was ground.
 	 */
-	public record Cluster(List<Block> blocks, double score, int placed, double dominance, int rebuilt, int minX, int minY, int minZ, int maxX, int maxY,
-			int maxZ) {
+	public record Cluster(List<Block> blocks, double score, int placed, double dominance, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
 	}
 
 	private Clusters() {
@@ -76,8 +70,6 @@ public final class Clusters {
 				}
 			}
 		}
-		Map<Long, ChunkDiff> byChunk = new HashMap<>();
-		diff.forEach(c -> byChunk.put((long) c.x() << 32 | (c.z() & 0xFFFFFFFFL), c));
 		Map<Integer, List<Integer>> members = new HashMap<>();
 		for (int i = 0; i < blocks.size(); i++) {
 			members.computeIfAbsent(find(parent, i), r -> new ArrayList<>()).add(i);
@@ -123,30 +115,10 @@ public final class Clusters {
 				maxY = Math.max(maxY, b.y());
 				maxZ = Math.max(maxZ, b.z());
 			}
-			clusters.add(new Cluster(in, score, placed, dominance(materials), rebuilt(byChunk, minX, minY, minZ, maxX, maxY, maxZ), minX, minY, minZ, maxX, maxY,
-					maxZ));
+			clusters.add(new Cluster(in, score, placed, dominance(materials), minX, minY, minZ, maxX, maxY, maxZ));
 		}
 		clusters.sort((a, b) -> Double.compare(b.score, a.score));
 		return clusters;
-	}
-
-	private static int rebuilt(Map<Long, ChunkDiff> byChunk, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-		int rebuilt = 0;
-		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
-			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
-				ChunkDiff chunk = byChunk.get((long) cx << 32 | (cz & 0xFFFFFFFFL));
-				if (chunk == null) {
-					continue;
-				}
-				for (Block b : chunk.blocks()) {
-					boolean in = b.x() >= minX && b.x() <= maxX && b.y() >= minY && b.y() <= maxY && b.z() >= minZ && b.z() <= maxZ;
-					if (in && Vocabulary.kind(b.reference()) == Kind.BUILT && Vocabulary.kind(b.saved()) != Kind.BUILT) {
-						rebuilt++;
-					}
-				}
-			}
-		}
-		return rebuilt;
 	}
 
 	private static String base(String state) {

@@ -166,6 +166,27 @@ class ExtractTest {
 		assertEquals(List.of(199), echoes.stream().map(Echo::x).toList());
 	}
 
+	/** A mod's desert house beside one the regeneration built, and a player's spruce hut beside the same. */
+	@Test
+	void clustersOfWhatTheRegenerationBuiltBesideThemAreGenerated(@TempDir Path noWorld) throws IOException {
+		List<Block> blocks = new ArrayList<>();
+		for (int i = 0; i < 8; i++) {
+			for (int y = 64; y < 69; y++) {
+				blocks.add(new Block(40 + i, y, 0, y % 2 == 0 ? "smooth_sandstone" : "cut_sandstone", "air"));
+				blocks.add(new Block(40 + i, y, 8, y % 2 == 0 ? "smooth_sandstone" : "cut_sandstone", "air"));
+			}
+			blocks.add(new Block(i, 64, 0, "sand", "smooth_sandstone"));
+			blocks.add(new Block(i, 65, 0, "air", "cut_sandstone"));
+			blocks.add(new Block(80 + i, 64, 0, "sand", "spruce_planks"));
+			blocks.add(new Block(80 + i, 65, 0, "air", "glass"));
+		}
+		List<Echo> echoes = Extract.cut(byChunk(blocks), Evidence.plain(), noWorld).echoes();
+		assertEquals(List.of(79), echoes.stream().map(Echo::x).toList());
+		List<Block> alone = blocks.stream().filter(b -> b.x() < 40).toList();
+		assertEquals(List.of(-1), Extract.cut(byChunk(alone), Evidence.plain(), noWorld).echoes().stream().map(Echo::x).toList(),
+				"with no village near, sandstone is a player's");
+	}
+
 	/** Noise reaching across a region beside a hut: the hut is still placeable alone. */
 	@Test
 	void aClusterTooWideToPlaceTakesNoNeighbourWithIt(@TempDir Path noWorld) throws IOException {

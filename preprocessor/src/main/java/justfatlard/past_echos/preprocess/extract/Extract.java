@@ -46,11 +46,25 @@ public final class Extract {
 	 */
 	public static final double MAX_DOMINANCE = 0.8;
 	/**
-	 * The most built blocks the regeneration may have in a cluster's span, per block the cluster
-	 * gained. In the household world its players' builds had 0 to 0.4 and the villages a mod
-	 * built over the regenerating generator's 1.3 to 80.
+	 * The most built blocks the regeneration may have in a cluster's span where the saved world
+	 * has none, per block the cluster gained. Where a mod's villages replace the regenerating
+	 * generator's, the span holds a whole village on each side, where a player built on what was
+	 * ground: in the household world its players' builds had 0 to 0.4 and its villages 1.3 to 80.
 	 */
 	public static final double MAX_REBUILT = 1;
+	/**
+	 * How far round a cluster to look for a village the regeneration built of the same blocks:
+	 * a mod's house can stand beside the regenerating generator's houses rather than on one.
+	 */
+	public static final int NEAR = 64;
+	/**
+	 * How alike, as the cosine of counts by block, what a cluster gained and what the regeneration
+	 * built near it must be for the cluster to be part of that village. In the household world
+	 * pieces of villages were 0.51 to 0.99, its players' builds 0 to 0.02, all else under 0.42.
+	 */
+	public static final double NEAR_LIKENESS = 0.5;
+	/** And how much the regeneration must have built near it: more than a stray door or two. */
+	public static final int MIN_NEAR = 64;
 	/** Terrain kept around each echo's evidence, on every side. */
 	public static final int MARGIN = 1;
 	/**
@@ -154,9 +168,60 @@ public final class Extract {
 
 	/** The clusters in a diff that count as player work. */
 	public static List<Cluster> accepted(List<ChunkDiff> diff, Evidence evidence) {
+		Map<Long, ChunkDiff> byChunk = new HashMap<>();
+		diff.forEach(c -> byChunk.put(chunkKey(c.x(), c.z()), c));
 		return Clusters.find(diff, evidence).stream()
-				.filter(c -> c.score() >= MIN_SCORE && c.placed() >= MIN_PLACED && c.dominance() <= MAX_DOMINANCE && c.rebuilt() <= MAX_REBUILT * c.placed())
+				.filter(c -> c.score() >= MIN_SCORE && c.placed() >= MIN_PLACED && c.dominance() <= MAX_DOMINANCE)
+				.filter(c -> !inVillage(c, byChunk, evidence))
 				.toList();
+	}
+
+	/** Whether the regeneration built a village where the cluster stands, or beside it of the same blocks. */
+	private static boolean inVillage(Cluster c, Map<Long, ChunkDiff> byChunk, Evidence evidence) {
+		if (total(rebuilt(c, 0, byChunk)) > MAX_REBUILT * c.placed()) {
+			return true;
+		}
+		Map<String, Integer> near = rebuilt(c, NEAR, byChunk);
+		if (total(near) < MIN_NEAR) {
+			return false;
+		}
+		Map<String, Integer> gained = new HashMap<>();
+		for (Block b : c.blocks()) {
+			if (evidence.weight(b.reference(), b.saved()) >= Evidence.PLACED) {
+				gained.merge(base(b.saved()), 1, Integer::sum);
+			}
+		}
+		return likeness(gained, near) >= NEAR_LIKENESS;
+	}
+
+	/** The built-looking blocks the regeneration has within reach of a cluster's span where the saved world has none, by block. */
+	private static Map<String, Integer> rebuilt(Cluster c, int reach, Map<Long, ChunkDiff> byChunk) {
+		Map<String, Integer> rebuilt = new HashMap<>();
+		for (int cx = (c.minX() - reach) >> 4; cx <= (c.maxX() + reach) >> 4; cx++) {
+			for (int cz = (c.minZ() - reach) >> 4; cz <= (c.maxZ() + reach) >> 4; cz++) {
+				ChunkDiff chunk = byChunk.get(chunkKey(cx, cz));
+				if (chunk == null) {
+					continue;
+				}
+				for (Block b : chunk.blocks()) {
+					boolean in = b.x() >= c.minX() - reach && b.x() <= c.maxX() + reach && b.y() >= c.minY() - reach && b.y() <= c.maxY() + reach
+							&& b.z() >= c.minZ() - reach && b.z() <= c.maxZ() + reach;
+					if (in && Vocabulary.kind(b.reference()) == Vocabulary.Kind.BUILT && Vocabulary.kind(b.saved()) != Vocabulary.Kind.BUILT) {
+						rebuilt.merge(base(b.reference()), 1, Integer::sum);
+					}
+				}
+			}
+		}
+		return rebuilt;
+	}
+
+	private static int total(Map<String, Integer> counts) {
+		return counts.values().stream().mapToInt(Integer::intValue).sum();
+	}
+
+	private static String base(String state) {
+		int bracket = state.indexOf('[');
+		return bracket < 0 ? state : state.substring(0, bracket);
 	}
 
 	/** The echoes in a diff above ground, cut from the saved world's region folder, highest score first. */
@@ -193,8 +258,7 @@ public final class Extract {
 		for (int i = 0; i < e.marks().length; i++) {
 			String state = e.palette()[e.states()[i]];
 			if (e.marks()[i] == EchoFile.EVIDENCE && Vocabulary.kind(state) != Vocabulary.Kind.AIR) {
-				int bracket = state.indexOf('[');
-				counts.merge(bracket < 0 ? state : state.substring(0, bracket), 1, Integer::sum);
+				counts.merge(base(state), 1, Integer::sum);
 			}
 		}
 		return counts;

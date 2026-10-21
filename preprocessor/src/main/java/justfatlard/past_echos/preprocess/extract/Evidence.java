@@ -25,7 +25,7 @@ import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
  * the generator placed, in about as many chunks as anywhere, where players' blocks crowd where
  * they were. That crowding overrules the reference side: where a mod's villages replace the
  * regenerating generator's, village blocks are on both sides, and players' farms are among them.
- * {@link Clusters.Cluster#rebuilt} tells those villages from the farms.
+ * {@link Extract#accepted} tells those villages from the farms.
  */
 public final class Evidence {
 	public static final double PLACED = 1;
