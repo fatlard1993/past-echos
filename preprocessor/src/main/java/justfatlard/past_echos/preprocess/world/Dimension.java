@@ -25,6 +25,7 @@ public final class Dimension {
 	public final List<RegionFile.Unreadable> unreadable = new ArrayList<>();
 	private final Map<Long, Byte> flags = new HashMap<>();
 	private final Map<Long, Long> inhabited = new HashMap<>();
+	private final List<int[]> structurePieces = new ArrayList<>();
 
 	private Dimension(List<Path> regionFiles) {
 		this.regionFiles = regionFiles;
@@ -59,6 +60,7 @@ public final class Dimension {
 			for (Chunk c : contents.chunks()) {
 				d.flags.put(key(c.x, c.z), (byte) ((c.decorated() ? DECORATED : 0) | (c.hasStatus() ? HAS_STATUS : 0)));
 				c.inhabitedTime().ifPresent(t -> d.inhabited.put(key(c.x, c.z), t));
+				d.structurePieces.addAll(c.structurePieces());
 			}
 			d.unreadable.addAll(contents.unreadable());
 		}
@@ -123,6 +125,11 @@ public final class Dimension {
 	public boolean visited(int x, int z, long minTicks) {
 		Long t = inhabited.get(key(x, z));
 		return t == null || t >= minTicks;
+	}
+
+	/** The boxes of every structure piece the dimension's chunks record, from {@link Chunk#structurePieces}. */
+	public List<int[]> structurePieces() {
+		return structurePieces;
 	}
 
 	private boolean decorated(int x, int z) {

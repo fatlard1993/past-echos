@@ -16,8 +16,12 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
 import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
+import justfatlard.past_echos.preprocess.extract.Vocabulary;
+import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
 import justfatlard.past_echos.preprocess.regen.Json;
+import justfatlard.past_echos.preprocess.world.Chunk;
 import justfatlard.past_echos.preprocess.world.Dimension;
+import justfatlard.past_echos.preprocess.world.RegionFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -101,6 +105,48 @@ public class DiffTest {
 			// So few chunks that the sample takes them all.
 			assertEquals(recordsTime ? all.compared() : 0, o.unvisitedCompared());
 			assertEquals(recordsTime, Files.exists(tmp.resolve("visited").resolve(Diff.UNVISITED_FILE)));
+		}
+	}
+
+	@ParameterizedTest(name = "{0}")
+	@ValueSource(strings = {"1.2.5", "1.6.4", "1.8.9", "1.12.2", "1.16.5", "1.18.2", "1.20.4", "26.3"})
+	void withoutARegenerationABuildIsWhatIsntNatural(String version, @TempDir Path tmp) throws IOException {
+		try (FileSystem plain = FileSystems.newFileSystem(resource("worlds/" + version + ".zip"));
+				FileSystem built = FileSystems.newFileSystem(resource("worlds/" + version + "-built.zip"))) {
+			Set<String> before = lines(DiffFile.read(Diff.savedOnly(Diff.findWorld(plain.getPath("/")), version, tmp.resolve("plain"), 0).diffFile()));
+			Set<String> after = new TreeSet<>(lines(DiffFile.read(Diff.savedOnly(Diff.findWorld(built.getPath("/")), version, tmp.resolve("built"), 0).diffFile())));
+			after.removeAll(before);
+			Set<String> placed = new TreeSet<>();
+			for (String line : manifest(built)) {
+				String block = line.substring(line.indexOf(" -> ") + 4);
+				Kind kind = Vocabulary.kind(block);
+				if (kind == Kind.BUILT || kind == Kind.STRUCTURE) {
+					placed.add(line.substring(0, line.indexOf(' ')) + " air -> " + block);
+				}
+			}
+			assertTrue(placed.size() > 10, placed.toString());
+			assertEquals(placed, after);
+		}
+	}
+
+	/** The 1.20.4 world's mineshaft runs under the hut: its rails are in its recorded pieces. */
+	@Test
+	void withoutARegenerationRecordedStructuresAreLeftOut(@TempDir Path tmp) throws IOException {
+		try (FileSystem plain = FileSystems.newFileSystem(resource("worlds/1.20.4.zip"))) {
+			Path world = Diff.findWorld(plain.getPath("/"));
+			long rails = 0;
+			for (Path file : Dimension.read(Dimension.overworldRegions(world)).regionFiles) {
+				for (Chunk c : RegionFile.read(file).chunks()) {
+					for (Chunk.Section section : c.sections().values()) {
+						for (int i = 0; i < 4096; i++) {
+							rails += section.block(i).startsWith("rail") ? 1 : 0;
+						}
+					}
+				}
+			}
+			assertTrue(rails > 0);
+			Set<String> diff = lines(DiffFile.read(Diff.savedOnly(world, "1.20.4", tmp, 0).diffFile()));
+			assertEquals(Set.of(), diff.stream().filter(l -> l.contains("-> rail")).collect(Collectors.toSet()));
 		}
 	}
 

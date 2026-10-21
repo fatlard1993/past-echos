@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
 import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
 import justfatlard.past_echos.preprocess.world.Chunk;
@@ -73,6 +74,67 @@ public final class WorldDiff {
 			}
 		}
 		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, unsettledReference, excluded, unreadable);
+	}
+
+	/**
+	 * Without a reference: every block of the settled chunks the filter takes that isn't natural,
+	 * as though gained from air, but for those inside a structure piece, which the generator
+	 * placed. For worlds no regeneration can reproduce.
+	 */
+	public static Stats unnatural(Dimension saved, Predicate<String> natural, BiPredicate<Integer, Integer> include, DiffFile.Writer out)
+			throws IOException {
+		Map<Long, List<int[]>> pieces = new HashMap<>();
+		for (int[] box : saved.structurePieces()) {
+			for (int cx = box[0] >> 4; cx <= box[3] >> 4; cx++) {
+				for (int cz = box[2] >> 4; cz <= box[5] >> 4; cz++) {
+					pieces.computeIfAbsent(key(cx, cz), k -> new ArrayList<>()).add(box);
+				}
+			}
+		}
+		Map<String, Boolean> naturalStates = new HashMap<>();
+		int compared = 0;
+		int differing = 0;
+		long blocks = 0;
+		int unsettledSaved = 0;
+		int excluded = 0;
+		for (Path file : saved.regionFiles) {
+			for (Chunk s : RegionFile.read(file).chunks()) {
+				if (!saved.settled(s.x, s.z)) {
+					unsettledSaved++;
+					continue;
+				}
+				if (!include.test(s.x, s.z)) {
+					excluded++;
+					continue;
+				}
+				compared++;
+				List<int[]> here = pieces.getOrDefault(key(s.x, s.z), List.of());
+				List<Block> diff = new ArrayList<>();
+				for (Section section : s.sections().values()) {
+					String[] palette = section.palette();
+					boolean[] keep = new boolean[palette.length];
+					for (int i = 0; i < palette.length; i++) {
+						keep[i] = !naturalStates.computeIfAbsent(palette[i], natural::test);
+					}
+					for (int i = 0; i < 4096; i++) {
+						if (keep[section.blocks()[i]]) {
+							int x = s.x * 16 + (i & 15);
+							int y = section.y() * 16 + (i >> 8);
+							int z = s.z * 16 + ((i >> 4) & 15);
+							if (here.stream().noneMatch(b -> x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5])) {
+								diff.add(new Block(x, y, z, Chunk.AIR, section.block(i)));
+							}
+						}
+					}
+				}
+				if (!diff.isEmpty()) {
+					differing++;
+					blocks += diff.size();
+					out.chunk(new ChunkDiff(s.x, s.z, diff));
+				}
+			}
+		}
+		return new Stats(saved.size(), compared, differing, blocks, unsettledSaved, 0, excluded, new ArrayList<>(saved.unreadable));
 	}
 
 	private static long key(int x, int z) {

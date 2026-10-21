@@ -14,7 +14,9 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
+import justfatlard.past_echos.preprocess.extract.Vocabulary;
 import justfatlard.past_echos.preprocess.regen.Regenerator;
 import justfatlard.past_echos.preprocess.regen.ServerJars;
 import justfatlard.past_echos.preprocess.world.Dimension;
@@ -39,7 +41,10 @@ public final class Diff {
 	/** Sampled in squares this many chunks across, which regenerate at little more than their own cost. */
 	static final int PATCH = 4;
 
-	/** @param unvisitedCompared how many sampled unvisited chunks went into {@link #UNVISITED_FILE} */
+	/**
+	 * @param unvisitedCompared how many sampled unvisited chunks went into {@link #UNVISITED_FILE}
+	 * @param reference the world diffed against, null for {@link #savedOnly}
+	 */
 	public record Outcome(Path diffFile, WorldDiff.Stats stats, int unvisitedCompared, Regenerator.Result reference) {
 	}
 
@@ -53,6 +58,7 @@ public final class Diff {
 		long minInhabited = MIN_INHABITED;
 		Path world = null;
 		Path referenceWorld = null;
+		boolean savedOnly = false;
 		for (int i = 0; i < args.length; i++) {
 			switch (args[i]) {
 				case "--version" -> version = value(args, ++i, "--version needs a Minecraft version");
@@ -60,6 +66,7 @@ public final class Diff {
 				case "--heap" -> heap = value(args, ++i, "--heap needs a size such as 3G");
 				case "--min-inhabited" -> minInhabited = Long.parseLong(value(args, ++i, "--min-inhabited needs a number of ticks"));
 				case "--reference" -> referenceWorld = Path.of(value(args, ++i, "--reference needs a world folder or zip"));
+				case "--saved-only" -> savedOnly = true;
 				case "--help", "-h" -> {
 					usage(null);
 					return;
@@ -92,7 +99,8 @@ public final class Diff {
 				usage("this world names no version (worlds before 1.9 don't); give the one it was generated with as --version");
 				return;
 			}
-			Outcome o = referenceRoot == null ? run(root, version, out, heap, minInhabited, System.err::println)
+			Outcome o = savedOnly ? savedOnly(root, version, out, minInhabited)
+					: referenceRoot == null ? run(root, version, out, heap, minInhabited, System.err::println)
 					: against(root, referenceRoot, version, out, minInhabited);
 			WorldDiff.Stats s = o.stats;
 			System.out.printf("%s: %,d saved chunks, %,d compared, %,d differ (%,d blocks)%n",
@@ -158,6 +166,35 @@ public final class Diff {
 	}
 
 	/**
+	 * Without regenerating: every visited block the vocabulary doesn't call natural, outside the
+	 * structure pieces the world records, as though gained from air. Noisier than a regeneration,
+	 * and blind to digging, but needs no server jar or generator that reproduces the world.
+	 */
+	public static Outcome savedOnly(Path world, String version, Path out, long minInhabited) throws IOException {
+		Files.createDirectories(out);
+		Dimension saved = Dimension.read(Dimension.overworldRegions(world));
+		Predicate<String> natural = state -> switch (Vocabulary.kind(state)) {
+			case AIR, FLUID, GROUND, GROWTH -> true;
+			case STRUCTURE, BUILT -> false;
+		};
+		Path diffFile = out.resolve("overworld.diff.gz");
+		WorldDiff.Stats stats;
+		try (DiffFile.Writer writer = new DiffFile.Writer(diffFile)) {
+			stats = WorldDiff.unnatural(saved, natural, (x, z) -> saved.visited(x, z, minInhabited), writer);
+		}
+		List<int[]> sample = unvisitedSample(saved, minInhabited);
+		Set<Long> sampled = keys(sample);
+		int unvisitedCompared = 0;
+		if (!sample.isEmpty()) {
+			try (DiffFile.Writer writer = new DiffFile.Writer(out.resolve(UNVISITED_FILE))) {
+				unvisitedCompared = WorldDiff.unnatural(saved, natural, (x, z) -> sampled.contains((long) x << 32 | (z & 0xFFFFFFFFL)), writer).compared();
+			}
+		}
+		summarize(out, version, stats, unvisitedCompared, 0);
+		return new Outcome(diffFile, stats, unvisitedCompared, null);
+	}
+
+	/**
 	 * Settled chunks under minInhabited ticks, in whole patches picked at random but the same
 	 * each run, up to about {@link #UNVISITED_SAMPLE}. Empty when every chunk was visited.
 	 */
@@ -188,8 +225,7 @@ public final class Diff {
 		try (DiffFile.Writer writer = new DiffFile.Writer(diffFile)) {
 			stats = WorldDiff.diff(saved, reference.dimension(), referenceRegions, (x, z) -> saved.visited(x, z, minInhabited), writer);
 		}
-		Set<Long> sampled = new HashSet<>();
-		sample.forEach(c -> sampled.add((long) c[0] << 32 | (c[1] & 0xFFFFFFFFL)));
+		Set<Long> sampled = keys(sample);
 		int unvisitedCompared = 0;
 		if (!sample.isEmpty()) {
 			Dimension sampleRegions = Dimension.read(Dimension.overworldRegions(world), Dimension.regionsHolding(sample));
@@ -198,6 +234,17 @@ public final class Diff {
 						(x, z) -> sampled.contains((long) x << 32 | (z & 0xFFFFFFFFL)), writer).compared();
 			}
 		}
+		summarize(out, version, stats, unvisitedCompared, reference.serverRuns());
+		return new Outcome(diffFile, stats, unvisitedCompared, reference);
+	}
+
+	private static Set<Long> keys(List<int[]> chunks) {
+		Set<Long> keys = new HashSet<>();
+		chunks.forEach(c -> keys.add((long) c[0] << 32 | (c[1] & 0xFFFFFFFFL)));
+		return keys;
+	}
+
+	private static void summarize(Path out, String version, WorldDiff.Stats stats, int unvisitedCompared, int serverRuns) throws IOException {
 		Files.writeString(out.resolve("diff.json"), String.format("""
 				{
 				 "version": "%s",
@@ -213,8 +260,7 @@ public final class Diff {
 				 "serverRuns": %d
 				}
 				""", version.replace("\"", "\\\""), stats.savedChunks(), stats.compared(), stats.differing(), stats.blocks(),
-				stats.unsettledSaved(), stats.unsettledReference(), stats.excluded(), unvisitedCompared, stats.unreadable().size(), reference.serverRuns()));
-		return new Outcome(diffFile, stats, unvisitedCompared, reference);
+				stats.unsettledSaved(), stats.unsettledReference(), stats.excluded(), unvisitedCompared, stats.unreadable().size(), serverRuns));
 	}
 
 	/** The shallowest folder holding a level.dat. */
@@ -239,7 +285,7 @@ public final class Diff {
 			System.err.println(problem);
 			System.err.println();
 		}
-		System.err.println("usage: past-echos diff [--version V] [--out DIR] [--heap SIZE] [--reference OLDER] [--min-inhabited TICKS] WORLD");
+		System.err.println("usage: past-echos diff [--version V] [--out DIR] [--heap SIZE] [--reference OLDER | --saved-only] [--min-inhabited TICKS] WORLD");
 		System.err.println();
 		System.err.println("  WORLD        a world folder (the one holding level.dat), or a zip holding one");
 		System.err.println("  --version    the version that generated the world, when level.dat doesn't say");
@@ -247,6 +293,8 @@ public final class Diff {
 		System.err.println("  --heap       the regenerating server's heap (default 3G)");
 		System.err.println("  --reference  an untouched earlier copy of the world to diff against instead of a");
 		System.err.println("               regeneration: no noise and any version or mod, but chunks it lacks are skipped");
+		System.err.println("  --saved-only every visited block that isn't natural, outside the structures the world");
+		System.err.println("               records: no regeneration, so any version, seed or mod, but noisier");
 		System.err.println("  --min-inhabited  skip chunks a player spent fewer ticks near (default " + MIN_INHABITED + ", a minute;");
 		System.err.println("               0 keeps all); worlds before 1.6 don't record it and keep every chunk");
 		System.err.println();

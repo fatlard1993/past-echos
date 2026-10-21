@@ -73,6 +73,32 @@ public final class Chunk {
 		return Nbt.number(level(), "InhabitedTime").map(OptionalLong::of).orElse(OptionalLong.empty());
 	}
 
+	/**
+	 * The boxes of the structure pieces this chunk holds the starts of, each as minX, minY, minZ,
+	 * maxX, maxY, maxZ: villages, mineshafts, trial chambers. Recorded from 1.13.
+	 */
+	public List<int[]> structurePieces() {
+		Map<String, Object> level = level();
+		Object structures = level.containsKey("structures") ? level.get("structures") : level.get("Structures");
+		if (!(structures instanceof Map<?, ?> s)) {
+			return List.of();
+		}
+		if (!((s.containsKey("starts") ? s.get("starts") : s.get("Starts")) instanceof Map<?, ?> starts)) {
+			return List.of();
+		}
+		List<int[]> pieces = new ArrayList<>();
+		for (Object start : starts.values()) {
+			if (start instanceof Map<?, ?> st && st.get("Children") instanceof List<?> children) {
+				for (Object child : children) {
+					if (child instanceof Map<?, ?> piece && piece.get("BB") instanceof int[] box && box.length == 6) {
+						pieces.add(box);
+					}
+				}
+			}
+		}
+		return pieces;
+	}
+
 	/** Block entities (signs, chests, banners) as saved, each placed by its world x, y and z. */
 	@SuppressWarnings("unchecked")
 	public List<Map<String, Object>> blockEntities() {
