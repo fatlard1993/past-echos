@@ -109,6 +109,38 @@ class EvidenceTest {
 		assertEquals(Evidence.PLACED, Evidence.of(visited).weight("grass_block", "mod:grass_slab"), "without the sample it looks placed");
 	}
 
+	/** Where the regenerating generator's villages stand in for a mod's, farmland is on both sides. */
+	@Test
+	void blocksCrowdedWhereVisitedOverruleTheReferenceSide() {
+		List<ChunkDiff> visited = new ArrayList<>();
+		for (int c = 0; c < 20; c++) {
+			List<Block> blocks = new ArrayList<>();
+			for (int i = 0; i < 4; i++) {
+				blocks.add(new Block(c * 16 + i, 64, 0, "farmland[moisture=7]", "grass_block"));
+				blocks.add(new Block(c * 16 + i, 64, 1, "grass_block", "farmland[moisture=7]"));
+				blocks.add(new Block(c * 16 + i, 64, 2, "glass", "grass_block"));
+				blocks.add(new Block(c * 16 + i, 64, 3, "grass_block", "glass"));
+			}
+			visited.add(new ChunkDiff(c, 0, blocks));
+		}
+		// Of 100 unvisited chunks, against 20 of 20 visited ones, farmland is in 2 and glass in 60.
+		List<ChunkDiff> unvisited = new ArrayList<>();
+		for (int c = 0; c < 60; c++) {
+			List<Block> blocks = new ArrayList<>();
+			blocks.add(new Block(c * 16, 64, 0, "grass_block", "glass"));
+			if (c < 2) {
+				blocks.add(new Block(c * 16, 64, 1, "grass_block", "farmland[moisture=7]"));
+			}
+			unvisited.add(new ChunkDiff(c, 1, blocks));
+		}
+		assertEquals(Set.of("farmland", "glass"), Evidence.of(visited).generated(), "both sides alike");
+		Evidence learned = Evidence.of(visited, 20, new Evidence.Unvisited(unvisited, 100));
+		assertEquals(Set.of("glass"), learned.generated());
+		assertEquals(Evidence.PLACED, learned.weight("grass_block", "farmland[moisture=7]"));
+		List<ChunkDiff> small = unvisited.subList(0, 10);
+		assertEquals(Set.of("farmland", "glass"), Evidence.of(visited, 20, new Evidence.Unvisited(small, 10)).generated(), "too few sampled to judge");
+	}
+
 	/** An ocean ruin crumbles at random, so regeneration loses some bricks and gains others. */
 	@Test
 	void blocksAClusterBothLosesAndGainsAreNoEvidence() {

@@ -45,6 +45,12 @@ public final class Extract {
 	 * nearly alone; builds mix materials (the test hut's commonest, planks, is 41%).
 	 */
 	public static final double MAX_DOMINANCE = 0.8;
+	/**
+	 * The most built blocks the regeneration may have in a cluster's span, per block the cluster
+	 * gained. In the household world its players' builds had 0 to 0.4 and the villages a mod
+	 * built over the regenerating generator's 1.3 to 80.
+	 */
+	public static final double MAX_REBUILT = 1;
 	/** Terrain kept around each echo's evidence, on every side. */
 	public static final int MARGIN = 1;
 	/**
@@ -149,7 +155,7 @@ public final class Extract {
 	/** The clusters in a diff that count as player work. */
 	public static List<Cluster> accepted(List<ChunkDiff> diff, Evidence evidence) {
 		return Clusters.find(diff, evidence).stream()
-				.filter(c -> c.score() >= MIN_SCORE && c.placed() >= MIN_PLACED && c.dominance() <= MAX_DOMINANCE)
+				.filter(c -> c.score() >= MIN_SCORE && c.placed() >= MIN_PLACED && c.dominance() <= MAX_DOMINANCE && c.rebuilt() <= MAX_REBUILT * c.placed())
 				.toList();
 	}
 
@@ -251,8 +257,11 @@ public final class Extract {
 	}
 
 	public static Cut cut(List<ChunkDiff> diff, Evidence evidence, Path savedRegions) throws IOException {
-		List<Box> all = merge(accepted(diff, evidence).stream().map(Box::of).toList());
-		List<Box> boxes = all.stream().filter(b -> b.maxX - b.minX < MAX_SPAN && b.maxZ - b.minZ < MAX_SPAN).toList();
+		// A cluster too wide on its own is dropped before merging, so it takes no neighbour with it.
+		List<Box> clusters = accepted(diff, evidence).stream().map(Box::of).toList();
+		List<Box> placeable = clusters.stream().filter(Box::placeable).toList();
+		List<Box> merged = merge(placeable);
+		List<Box> boxes = merged.stream().filter(Box::placeable).toList();
 		Map<Long, ChunkDiff> diffByChunk = new HashMap<>();
 		diff.forEach(c -> diffByChunk.put(chunkKey(c.x(), c.z()), c));
 		Map<String, Path> regionFiles = regionFiles(savedRegions);
@@ -291,13 +300,17 @@ public final class Extract {
 			}
 		}
 		return new Cut(cuttings.stream().map(Cutting::echo).sorted((a, b) -> Double.compare(b.score(), a.score())).toList(),
-				all.size() - boxes.size());
+				clusters.size() - placeable.size() + merged.size() - boxes.size());
 	}
 
 	/** A cluster's span with the margin around it. Clusters whose boxes touch become one. */
 	private record Box(int minX, int minY, int minZ, int maxX, int maxY, int maxZ, double score) {
 		static Box of(Cluster c) {
 			return new Box(c.minX() - MARGIN, c.minY() - MARGIN, c.minZ() - MARGIN, c.maxX() + MARGIN, c.maxY() + MARGIN, c.maxZ() + MARGIN, c.score());
+		}
+
+		boolean placeable() {
+			return maxX - minX < MAX_SPAN && maxZ - minZ < MAX_SPAN;
 		}
 
 		boolean touches(Box o) {

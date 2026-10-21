@@ -9,11 +9,15 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import justfatlard.past_echos.preprocess.diff.Diff;
 import justfatlard.past_echos.preprocess.diff.DiffFile;
+import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
+import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
 import justfatlard.past_echos.preprocess.diff.DiffTest;
 import justfatlard.past_echos.preprocess.extract.EchoFile.Echo;
 import justfatlard.past_echos.preprocess.regen.Json;
@@ -143,6 +147,45 @@ class ExtractTest {
 		List<Echo> kept = Extract.unrepeated(echoes);
 		assertEquals(echoes.subList(3, 6), kept, "the houses are nearer one another than copies need be");
 		assertEquals(List.of(ship), Extract.unrepeated(List.of(ship)));
+	}
+
+	/** A mod's village house where the regeneration put its own, and a player's farm on what was grass. */
+	@Test
+	void clustersWhereTheRegenerationBuiltTooAreGenerated(@TempDir Path noWorld) throws IOException {
+		List<Block> blocks = new ArrayList<>();
+		for (int i = 0; i < 8; i++) {
+			blocks.add(new Block(i, 64, 0, "grass_block", "mud_bricks"));
+			blocks.add(new Block(i, 64, 1, "grass_block", "acacia_planks"));
+			blocks.add(new Block(i, 65, 0, "glass_pane", "air"));
+			blocks.add(new Block(i, 65, 1, "oak_stairs[facing=east]", "air"));
+			blocks.add(new Block(i, 66, 1, "spruce_planks", "air"));
+			blocks.add(new Block(200 + i, 64, 0, "grass_block", "farmland[moisture=7]"));
+			blocks.add(new Block(200 + i, 64, 2, "grass_block", "oak_fence"));
+		}
+		List<Echo> echoes = Extract.cut(byChunk(blocks), Evidence.plain(), noWorld).echoes();
+		assertEquals(List.of(199), echoes.stream().map(Echo::x).toList());
+	}
+
+	/** Noise reaching across a region beside a hut: the hut is still placeable alone. */
+	@Test
+	void aClusterTooWideToPlaceTakesNoNeighbourWithIt(@TempDir Path noWorld) throws IOException {
+		List<Block> blocks = new ArrayList<>();
+		for (int x = 0; x < Extract.MAX_SPAN + 60; x++) {
+			blocks.add(new Block(x, 40, 0, "stone", x % 2 == 0 ? "glass" : "oak_planks"));
+		}
+		for (int i = 0; i < 6; i++) {
+			blocks.add(new Block(100 + i, 42, 3, "air", "spruce_planks"));
+			blocks.add(new Block(100 + i, 43, 3, "air", "glass"));
+		}
+		Extract.Cut cut = Extract.cut(byChunk(blocks), Evidence.plain(), noWorld);
+		assertEquals(List.of(99), cut.echoes().stream().map(Echo::x).toList());
+		assertEquals(1, cut.tooWide());
+	}
+
+	private static List<ChunkDiff> byChunk(List<Block> blocks) {
+		Map<List<Integer>, List<Block>> chunks = new LinkedHashMap<>();
+		blocks.forEach(b -> chunks.computeIfAbsent(List.of(b.x() >> 4, b.z() >> 4), k -> new ArrayList<>()).add(b));
+		return chunks.entrySet().stream().map(e -> new ChunkDiff(e.getKey().get(0), e.getKey().get(1), e.getValue())).toList();
 	}
 
 	/** An echo of planks, wool and fences, one block of each in a row, all evidence. */

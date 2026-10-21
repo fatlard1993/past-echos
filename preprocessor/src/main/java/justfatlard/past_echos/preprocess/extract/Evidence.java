@@ -23,7 +23,9 @@ import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
  * <p>A block the saved world's generator made but the regenerating one can't, a mod's worldgen,
  * is on the saved side only. Chunks no player spent time near show it: what they gained there,
  * the generator placed, in about as many chunks as anywhere, where players' blocks crowd where
- * they were.
+ * they were. That crowding overrules the reference side: where a mod's villages replace the
+ * regenerating generator's, village blocks are on both sides, and players' farms are among them.
+ * {@link Clusters.Cluster#rebuilt} tells those villages from the farms.
  */
 public final class Evidence {
 	public static final double PLACED = 1;
@@ -107,12 +109,19 @@ public final class Evidence {
 		for (ChunkDiff chunk : unvisited.diff()) {
 			chunk.blocks().stream().map(b -> name(b.saved())).distinct().forEach(n -> unvisitedHolding.merge(n, 1, Integer::sum));
 		}
-		unvisitedHolding.forEach((name, n) -> {
-			double visited = (double) visitedHolding.getOrDefault(name, 0) / Math.max(compared, 1);
-			if (n >= MIN_UNVISITED_CHUNKS && (double) n / unvisited.compared() >= UNVISITED_SHARE * visited) {
+		Set<String> names = new HashSet<>(visitedHolding.keySet());
+		names.addAll(unvisitedHolding.keySet());
+		for (String name : names) {
+			int n = unvisitedHolding.getOrDefault(name, 0);
+			double expected = (double) visitedHolding.getOrDefault(name, 0) / Math.max(compared, 1) * unvisited.compared();
+			boolean crowded = n < UNVISITED_SHARE * expected;
+			if (n >= MIN_UNVISITED_CHUNKS && !crowded) {
 				generated.add(name);
+			} else if (crowded && expected >= MIN_UNVISITED_CHUNKS) {
+				// Crowding where players were outweighs the reference side, which another generator's villages fill.
+				generated.remove(name);
 			}
-		});
+		}
 		return new Evidence(Set.copyOf(generated));
 	}
 
