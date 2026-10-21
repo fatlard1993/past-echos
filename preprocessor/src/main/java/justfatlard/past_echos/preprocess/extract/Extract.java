@@ -6,10 +6,12 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import justfatlard.past_echos.preprocess.diff.Diff;
@@ -85,6 +87,16 @@ public final class Extract {
 	public static final int COPIES_APART = 256;
 	/** As many copies of one thing as make it a generated structure. */
 	public static final int COPIES = 3;
+	/** How alike in palette, as the same cosine, two echoes must be for their layouts to be compared. */
+	public static final double COPY_PALETTE = 0.8;
+	/**
+	 * The share of the larger echo's evidence two echoes must hold in the same layout, in some
+	 * turn or mirroring, to be copies of one generated thing, so that a single copy far off is
+	 * enough. In the household world ships, village houses and sky ruins held 0.57 to 1 with their
+	 * copies; its players' builds 0.02 to 0.09 with their look-alikes, torch-lit cobbled deepslate
+	 * shafts of one palette among them.
+	 */
+	public static final double COPY_SHAPE = 0.5;
 
 	private Extract() {
 	}
@@ -230,26 +242,99 @@ public final class Extract {
 	}
 
 	/**
-	 * The echoes without {@link #COPIES} or more far-apart copies: those are a generated
-	 * structure the regeneration placed elsewhere or not at all, a mod's ship or village house.
+	 * The echoes without {@link #COPIES} or more far-apart copies alike in palette, or one alike
+	 * in layout: those are a generated structure the regeneration placed elsewhere or not at all,
+	 * a mod's ship, village house or sky ruin.
 	 */
 	public static List<Echo> unrepeated(List<Echo> echoes) {
 		List<Map<String, Integer>> placed = echoes.stream().map(Extract::placed).toList();
+		Map<Integer, Layout> layouts = new HashMap<>();
 		List<Echo> kept = new ArrayList<>();
 		for (int i = 0; i < echoes.size(); i++) {
 			int copies = 1;
-			for (int j = 0; j < echoes.size() && copies < COPIES; j++) {
+			boolean copied = false;
+			for (int j = 0; j < echoes.size() && copies < COPIES && !copied; j++) {
 				long dx = echoes.get(i).x() - echoes.get(j).x();
 				long dz = echoes.get(i).z() - echoes.get(j).z();
-				if (dx * dx + dz * dz > (long) COPIES_APART * COPIES_APART && likeness(placed.get(i), placed.get(j)) >= COPY_LIKENESS) {
-					copies++;
+				if (dx * dx + dz * dz <= (long) COPIES_APART * COPIES_APART) {
+					continue;
 				}
+				double likeness = likeness(placed.get(i), placed.get(j));
+				copies += likeness >= COPY_LIKENESS ? 1 : 0;
+				copied = likeness >= COPY_PALETTE
+						&& layouts.computeIfAbsent(i, k -> Layout.of(echoes.get(k))).shared(layouts.computeIfAbsent(j, k -> Layout.of(echoes.get(k)))) >= COPY_SHAPE;
 			}
-			if (copies < COPIES) {
+			if (copies < COPIES && !copied) {
 				kept.add(echoes.get(i));
 			}
 		}
 		return kept;
+	}
+
+	/** An echo's evidence blocks by block, as positions in its box. */
+	private record Layout(Map<String, List<int[]>> cells, int size) {
+		static Layout of(Echo e) {
+			Map<String, List<int[]>> cells = new HashMap<>();
+			int size = 0;
+			for (int y = 0; y < e.sizeY(); y++) {
+				for (int z = 0; z < e.sizeZ(); z++) {
+					for (int x = 0; x < e.sizeX(); x++) {
+						String state = e.state(x, y, z);
+						if (e.mark(x, y, z) == EchoFile.EVIDENCE && Vocabulary.kind(state) != Vocabulary.Kind.AIR) {
+							cells.computeIfAbsent(base(state), k -> new ArrayList<>()).add(new int[] {x, y, z});
+							size++;
+						}
+					}
+				}
+			}
+			return new Layout(cells, size);
+		}
+
+		/**
+		 * The most blocks the two hold alike in the same places, over every turn and mirroring of
+		 * the smaller and every shift that lays one of its rarest blocks on one of the larger's, as
+		 * a share of the larger.
+		 */
+		double shared(Layout o) {
+			Layout small = size <= o.size ? this : o;
+			Layout large = small == this ? o : this;
+			Map<String, Set<Long>> at = new HashMap<>();
+			large.cells.forEach((name, list) -> at.put(name, list.stream().map(c -> Clusters.key(c[0], c[1], c[2])).collect(Collectors.toSet())));
+			String anchor = small.cells.keySet().stream().filter(at::containsKey).min(Comparator.comparingInt(n -> at.get(n).size())).orElse(null);
+			if (anchor == null) {
+				return 0;
+			}
+			int best = 0;
+			for (int turn = 0; turn < 8; turn++) {
+				int[] from = turned(small.cells.get(anchor).getFirst(), turn);
+				for (int[] to : large.cells.get(anchor)) {
+					int hits = 0;
+					for (Map.Entry<String, List<int[]>> e : small.cells.entrySet()) {
+						Set<Long> there = at.get(e.getKey());
+						if (there == null) {
+							continue;
+						}
+						for (int[] c : e.getValue()) {
+							int[] t = turned(c, turn);
+							hits += there.contains(Clusters.key(t[0] - from[0] + to[0], t[1] - from[1] + to[1], t[2] - from[2] + to[2])) ? 1 : 0;
+						}
+					}
+					best = Math.max(best, hits);
+				}
+			}
+			return (double) best / large.size;
+		}
+
+		private static int[] turned(int[] c, int turn) {
+			int x = (turn & 4) != 0 ? -c[0] : c[0];
+			int z = c[2];
+			for (int i = 0; i < (turn & 3); i++) {
+				int t = x;
+				x = -z;
+				z = t;
+			}
+			return new int[] {x, c[1], z};
+		}
 	}
 
 	/** The echo's evidence by block, air left out. */

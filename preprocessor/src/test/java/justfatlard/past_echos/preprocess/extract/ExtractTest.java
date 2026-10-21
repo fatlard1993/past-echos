@@ -209,6 +209,63 @@ class ExtractTest {
 		return chunks.entrySet().stream().map(e -> new ChunkDiff(e.getKey().get(0), e.getKey().get(1), e.getValue())).toList();
 	}
 
+	/** A mod's sky ruin twice, turned and crumbled, and two torch-lit shafts of one palette but not one layout. */
+	@Test
+	void oneCopyFarOffInTheSameLayoutIsEnough() {
+		Map<List<Integer>, String> ruin = new LinkedHashMap<>();
+		for (int x = 0; x < 6; x++) {
+			ruin.put(List.of(x, 0, 0), "purpur_block");
+			ruin.put(List.of(x, 0, 1), "purpur_block");
+		}
+		for (int y = 1; y < 5; y++) {
+			ruin.put(List.of(0, y, 0), "purpur_pillar[axis=y]");
+		}
+		ruin.put(List.of(5, 1, 0), "purpur_stairs[facing=east]");
+		ruin.put(List.of(5, 1, 1), "purpur_stairs[facing=east]");
+		Map<List<Integer>, String> turned = new LinkedHashMap<>();
+		ruin.forEach((c, block) -> turned.put(List.of(1 - c.get(2), c.get(1), c.get(0)), block));
+		turned.remove(List.of(1, 0, 3));
+		turned.remove(List.of(1, 4, 0));
+		Echo shaft = echo(-2000, -1200, column("cobbled_deepslate", 8, "torch"));
+		Map<List<Integer>, String> floor = new LinkedHashMap<>();
+		for (int x = 0; x < 8; x++) {
+			floor.put(List.of(x, 0, 0), "cobbled_deepslate");
+		}
+		floor.put(List.of(2, 1, 0), "torch");
+		floor.put(List.of(5, 1, 0), "torch");
+		List<Echo> echoes = List.of(echo(150, -70, ruin), echo(700, -2800, turned), shaft, echo(-40, -100, floor));
+		assertEquals(echoes.subList(2, 4), Extract.unrepeated(echoes));
+	}
+
+	private static Map<List<Integer>, String> column(String block, int height, String torch) {
+		Map<List<Integer>, String> cells = new LinkedHashMap<>();
+		for (int y = 0; y < height; y++) {
+			cells.put(List.of(0, y, 0), block);
+		}
+		cells.put(List.of(1, 3, 0), torch);
+		cells.put(List.of(1, 6, 0), torch);
+		return cells;
+	}
+
+	/** An echo holding these blocks, at positions from its corner, all evidence. */
+	private static Echo echo(int x, int z, Map<List<Integer>, String> cells) {
+		int sx = cells.keySet().stream().mapToInt(c -> c.get(0)).max().orElse(0) + 1;
+		int sy = cells.keySet().stream().mapToInt(c -> c.get(1)).max().orElse(0) + 1;
+		int sz = cells.keySet().stream().mapToInt(c -> c.get(2)).max().orElse(0) + 1;
+		List<String> palette = new ArrayList<>(List.of("air"));
+		int[] states = new int[sx * sy * sz];
+		byte[] marks = new byte[states.length];
+		cells.forEach((c, block) -> {
+			if (!palette.contains(block)) {
+				palette.add(block);
+			}
+			int i = (c.get(1) * sz + c.get(2)) * sx + c.get(0);
+			states[i] = palette.indexOf(block);
+			marks[i] = EchoFile.EVIDENCE;
+		});
+		return new Echo(x, 200, z, sx, sy, sz, cells.size(), 5023, palette.toArray(String[]::new), states, marks, List.of());
+	}
+
 	/** An echo of planks, wool and fences, one block of each in a row, all evidence. */
 	private static Echo boat(int x, int z, int planks, int wool, int fences) {
 		String[] palette = {"spruce_planks", "white_wool", "dark_oak_fence[north=true]"};
