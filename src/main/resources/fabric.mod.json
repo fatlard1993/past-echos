@@ -11,6 +11,7 @@
     "sources": "https://github.com/fatlard1993/past-echos"
   },
   "license": "MIT",
+  "icon": "assets/past-echos-justfatlard/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
