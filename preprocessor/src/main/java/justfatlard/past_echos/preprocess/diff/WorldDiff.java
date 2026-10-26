@@ -16,6 +16,7 @@ import justfatlard.past_echos.preprocess.world.Chunk;
 import justfatlard.past_echos.preprocess.world.Chunk.Section;
 import justfatlard.past_echos.preprocess.world.Dimension;
 import justfatlard.past_echos.preprocess.world.RegionFile;
+import justfatlard.past_echos.preprocess.world.Structures;
 
 /**
  * Compares a saved dimension with its reference, region file by region file, over the chunks
@@ -83,14 +84,7 @@ public final class WorldDiff {
 	 */
 	public static Stats unnatural(Dimension saved, Predicate<String> natural, BiPredicate<Integer, Integer> include, DiffFile.Writer out)
 			throws IOException {
-		Map<Long, List<int[]>> pieces = new HashMap<>();
-		for (int[] box : saved.structurePieces()) {
-			for (int cx = box[0] >> 4; cx <= box[3] >> 4; cx++) {
-				for (int cz = box[2] >> 4; cz <= box[5] >> 4; cz++) {
-					pieces.computeIfAbsent(key(cx, cz), k -> new ArrayList<>()).add(box);
-				}
-			}
-		}
+		Structures pieces = new Structures(saved.structurePieces());
 		Map<String, Boolean> naturalStates = new HashMap<>();
 		int compared = 0;
 		int differing = 0;
@@ -108,7 +102,6 @@ public final class WorldDiff {
 					continue;
 				}
 				compared++;
-				List<int[]> here = pieces.getOrDefault(key(s.x, s.z), List.of());
 				List<Block> diff = new ArrayList<>();
 				for (Section section : s.sections().values()) {
 					String[] palette = section.palette();
@@ -121,7 +114,7 @@ public final class WorldDiff {
 							int x = s.x * 16 + (i & 15);
 							int y = section.y() * 16 + (i >> 8);
 							int z = s.z * 16 + ((i >> 4) & 15);
-							if (here.stream().noneMatch(b -> x >= b[0] && x <= b[3] && y >= b[1] && y <= b[4] && z >= b[2] && z <= b[5])) {
+							if (!pieces.contains(x, y, z)) {
 								diff.add(new Block(x, y, z, Chunk.AIR, section.block(i)));
 							}
 						}

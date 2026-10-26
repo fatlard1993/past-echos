@@ -25,6 +25,7 @@ import justfatlard.past_echos.preprocess.world.Chunk;
 import justfatlard.past_echos.preprocess.world.Dimension;
 import justfatlard.past_echos.preprocess.world.Nbt;
 import justfatlard.past_echos.preprocess.world.RegionFile;
+import justfatlard.past_echos.preprocess.world.Structures;
 
 /**
  * Stage two: sorts a world's diff into player work and regeneration noise, and cuts each piece
@@ -148,20 +149,20 @@ public final class Extract {
 		try {
 			Path root = zip == null ? world : Diff.findWorld(zip.getPath("/"));
 			List<ChunkDiff> diff = DiffFile.read(diffFile);
-			Evidence evidence = Evidence.of(diff, compared, unvisited);
+			Evidence evidence = Evidence.of(diff, compared, unvisited, Structures.read(diffDir.resolve(Diff.STRUCTURES_FILE)));
 			if (unvisited.compared() > 0) {
 				System.out.printf("learned from %,d unvisited chunks; generated: %s%n", unvisited.compared(),
 						evidence.generated().stream().sorted().collect(Collectors.joining(", ")));
 			}
 			Cut whole = cut(diff, evidence, Dimension.overworldRegions(root));
 			List<Echo> cut = whole.echoes();
-			List<Echo> unrepeated = unrepeated(cut);
-			List<Echo> echoes = unrepeated.stream().filter(Extract::onSurface).toList();
+			List<Echo> surface = cut.stream().filter(Extract::onSurface).toList();
+			List<Echo> echoes = placeable(cut);
 			Path out = diffDir.resolve("echoes.gz");
 			EchoFile.write(out, version, echoes);
 			Files.writeString(diffDir.resolve("echoes.json"), summary(version, echoes));
-			int repeated = cut.size() - unrepeated.size();
-			int underground = unrepeated.size() - echoes.size();
+			int underground = cut.size() - surface.size();
+			int repeated = surface.size() - echoes.size();
 			System.out.printf("%s: %,d %s%s%s%s%n", version, echoes.size(), echoes.size() == 1 ? "echo" : "echoes",
 					repeated > 0 ? String.format(", %,d copies of generated structures skipped", repeated) : "",
 					underground > 0 ? String.format(", %,d underground skipped", underground) : "",
@@ -199,7 +200,7 @@ public final class Extract {
 		}
 		Map<String, Integer> gained = new HashMap<>();
 		for (Block b : c.blocks()) {
-			if (evidence.weight(b.reference(), b.saved()) >= Evidence.PLACED) {
+			if (evidence.weight(b) >= Evidence.PLACED) {
 				gained.merge(base(b.saved()), 1, Integer::sum);
 			}
 		}
@@ -238,13 +239,19 @@ public final class Extract {
 
 	/** The echoes in a diff above ground, cut from the saved world's region folder, highest score first. */
 	public static List<Echo> run(List<ChunkDiff> diff, Path savedRegions) throws IOException {
-		return unrepeated(cut(diff, savedRegions)).stream().filter(Extract::onSurface).toList();
+		return placeable(cut(diff, savedRegions));
+	}
+
+	/** Of the echoes cut, those above ground that no copies show to be generated. */
+	public static List<Echo> placeable(List<Echo> cut) {
+		return unrepeated(cut.stream().filter(Extract::onSurface).toList());
 	}
 
 	/**
 	 * The echoes without {@link #COPIES} or more far-apart copies alike in palette, or one alike
 	 * in layout: those are a generated structure the regeneration placed elsewhere or not at all,
-	 * a mod's ship, village house or sky ruin.
+	 * a mod's ship, village house or sky ruin. Give it the echoes above ground: players' mines
+	 * are as alike in palette as a ship's copies, so would make copies of a player's tower.
 	 */
 	public static List<Echo> unrepeated(List<Echo> echoes) {
 		List<Map<String, Integer>> placed = echoes.stream().map(Extract::placed).toList();
@@ -563,7 +570,7 @@ public final class Extract {
 
 		void mark(Block b) {
 			if (box.contains(b.x(), b.y(), b.z())) {
-				marks[index(b.x(), b.y(), b.z())] = evidence.weight(b.reference(), b.saved()) > 0 ? EchoFile.EVIDENCE : EchoFile.CHANGED;
+				marks[index(b.x(), b.y(), b.z())] = evidence.weight(b) > 0 ? EchoFile.EVIDENCE : EchoFile.CHANGED;
 			}
 		}
 

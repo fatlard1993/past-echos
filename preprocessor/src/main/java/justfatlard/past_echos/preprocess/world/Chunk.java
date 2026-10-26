@@ -74,10 +74,10 @@ public final class Chunk {
 	}
 
 	/**
-	 * The boxes of the structure pieces this chunk holds the starts of, each as minX, minY, minZ,
-	 * maxX, maxY, maxZ: villages, mineshafts, trial chambers. Recorded from 1.13.
+	 * The pieces of the structures this chunk holds the starts of: villages, mineshafts, trial
+	 * chambers, and mods' structures. Recorded from 1.13.
 	 */
-	public List<int[]> structurePieces() {
+	public List<Structures.Piece> structurePieces() {
 		Map<String, Object> level = level();
 		Object structures = level.containsKey("structures") ? level.get("structures") : level.get("Structures");
 		if (!(structures instanceof Map<?, ?> s)) {
@@ -86,12 +86,12 @@ public final class Chunk {
 		if (!((s.containsKey("starts") ? s.get("starts") : s.get("Starts")) instanceof Map<?, ?> starts)) {
 			return List.of();
 		}
-		List<int[]> pieces = new ArrayList<>();
-		for (Object start : starts.values()) {
-			if (start instanceof Map<?, ?> st && st.get("Children") instanceof List<?> children) {
+		List<Structures.Piece> pieces = new ArrayList<>();
+		for (Map.Entry<?, ?> start : starts.entrySet()) {
+			if (start.getValue() instanceof Map<?, ?> st && st.get("Children") instanceof List<?> children) {
 				for (Object child : children) {
 					if (child instanceof Map<?, ?> piece && piece.get("BB") instanceof int[] box && box.length == 6) {
-						pieces.add(box);
+						pieces.add(new Structures.Piece(String.valueOf(start.getKey()), box));
 					}
 				}
 			}

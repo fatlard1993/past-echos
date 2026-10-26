@@ -22,6 +22,7 @@ import justfatlard.past_echos.preprocess.regen.Json;
 import justfatlard.past_echos.preprocess.world.Chunk;
 import justfatlard.past_echos.preprocess.world.Dimension;
 import justfatlard.past_echos.preprocess.world.RegionFile;
+import justfatlard.past_echos.preprocess.world.Structures;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -147,6 +148,9 @@ public class DiffTest {
 			assertTrue(rails > 0);
 			Set<String> diff = lines(DiffFile.read(Diff.savedOnly(world, "1.20.4", tmp, 0).diffFile()));
 			assertEquals(Set.of(), diff.stream().filter(l -> l.contains("-> rail")).collect(Collectors.toSet()));
+			Structures written = Structures.read(tmp.resolve(Diff.STRUCTURES_FILE));
+			assertEquals(Dimension.read(Dimension.overworldRegions(world)).structurePieces().size(), written.size());
+			assertTrue(written.size() > 0);
 		}
 	}
 

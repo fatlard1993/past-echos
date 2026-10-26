@@ -21,6 +21,7 @@ import justfatlard.past_echos.preprocess.regen.Regenerator;
 import justfatlard.past_echos.preprocess.regen.ServerJars;
 import justfatlard.past_echos.preprocess.world.Dimension;
 import justfatlard.past_echos.preprocess.world.Nbt;
+import justfatlard.past_echos.preprocess.world.Structures;
 
 /**
  * Stage one: regenerates a world's overworld from its seed with the official server jar and
@@ -38,6 +39,8 @@ public final class Diff {
 	 * its doors and farmland look generated; at 10,000 villages come in about their usual share.
 	 */
 	static final int UNVISITED_SAMPLE = 10_000;
+	/** The boxes of the structure pieces the saved world records, as {@link Structures#write} leaves them. */
+	public static final String STRUCTURES_FILE = "structures.gz";
 	/** Sampled in squares this many chunks across, which regenerate at little more than their own cost. */
 	static final int PATCH = 4;
 
@@ -190,7 +193,7 @@ public final class Diff {
 				unvisitedCompared = WorldDiff.unnatural(saved, natural, (x, z) -> sampled.contains((long) x << 32 | (z & 0xFFFFFFFFL)), writer).compared();
 			}
 		}
-		summarize(out, version, stats, unvisitedCompared, 0);
+		summarize(out, version, saved, stats, unvisitedCompared, 0);
 		return new Outcome(diffFile, stats, unvisitedCompared, null);
 	}
 
@@ -234,7 +237,7 @@ public final class Diff {
 						(x, z) -> sampled.contains((long) x << 32 | (z & 0xFFFFFFFFL)), writer).compared();
 			}
 		}
-		summarize(out, version, stats, unvisitedCompared, reference.serverRuns());
+		summarize(out, version, saved, stats, unvisitedCompared, reference.serverRuns());
 		return new Outcome(diffFile, stats, unvisitedCompared, reference);
 	}
 
@@ -244,7 +247,9 @@ public final class Diff {
 		return keys;
 	}
 
-	private static void summarize(Path out, String version, WorldDiff.Stats stats, int unvisitedCompared, int serverRuns) throws IOException {
+	private static void summarize(Path out, String version, Dimension saved, WorldDiff.Stats stats, int unvisitedCompared, int serverRuns)
+			throws IOException {
+		new Structures(saved.structurePieces()).write(out.resolve(STRUCTURES_FILE));
 		Files.writeString(out.resolve("diff.json"), String.format("""
 				{
 				 "version": "%s",

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import justfatlard.past_echos.preprocess.diff.DiffFile.Block;
 import justfatlard.past_echos.preprocess.diff.DiffFile.ChunkDiff;
+import justfatlard.past_echos.preprocess.world.Structures;
 import justfatlard.past_echos.preprocess.extract.Vocabulary.Kind;
 import org.junit.jupiter.api.Test;
 
@@ -65,8 +66,13 @@ class EvidenceTest {
 			blocks.add(new Block(i, 7, 0, "air", "glass_pane"));
 			blocks.add(new Block(i, 8, 0, "air", "glass_pane"));
 		}
+		// The regeneration built a village where the saved world's mod allowed none, a player one bed.
+		for (int i = 0; i < 40; i++) {
+			blocks.add(new Block(i, 9, 0, "white_bed", "air"));
+		}
+		blocks.add(new Block(0, 10, 0, "air", "white_bed"));
 		Evidence evidence = Evidence.of(List.of(new ChunkDiff(0, 0, blocks)));
-		assertEquals(Set.of("sulfur", "cinnabar"), evidence.generated());
+		assertEquals(Set.of("sulfur", "cinnabar"), evidence.generated(), "beds on the reference side alone");
 		assertEquals(0, evidence.weight("water", "sulfur"));
 		assertEquals(Evidence.PLACED, evidence.weight("air", "stone_bricks"));
 		assertEquals(Evidence.PLACED, evidence.weight("air", "glass_pane"), "a quarter or fewer on the reference side is the player's");
@@ -120,25 +126,59 @@ class EvidenceTest {
 				blocks.add(new Block(c * 16 + i, 64, 1, "grass_block", "farmland[moisture=7]"));
 				blocks.add(new Block(c * 16 + i, 64, 2, "glass", "grass_block"));
 				blocks.add(new Block(c * 16 + i, 64, 3, "grass_block", "glass"));
+				blocks.add(new Block(c * 16 + i, 20, 2, "mod:sulfur", "stone"));
+				blocks.add(new Block(c * 16 + i, 20, 3, "stone", "mod:sulfur"));
 			}
 			visited.add(new ChunkDiff(c, 0, blocks));
 		}
-		// Of 100 unvisited chunks, against 20 of 20 visited ones, farmland is in 2 and glass in 60.
+		// Of 100 unvisited chunks, against 20 of 20 visited ones, farmland is in 2, sulfur in 40 and glass in 60.
 		List<ChunkDiff> unvisited = new ArrayList<>();
 		for (int c = 0; c < 60; c++) {
 			List<Block> blocks = new ArrayList<>();
 			blocks.add(new Block(c * 16, 64, 0, "grass_block", "glass"));
+			if (c < 40) {
+				blocks.add(new Block(c * 16, 20, 0, "stone", "mod:sulfur"));
+			}
 			if (c < 2) {
 				blocks.add(new Block(c * 16, 64, 1, "grass_block", "farmland[moisture=7]"));
 			}
 			unvisited.add(new ChunkDiff(c, 1, blocks));
 		}
-		assertEquals(Set.of("farmland", "glass"), Evidence.of(visited).generated(), "both sides alike");
+		assertEquals(Set.of("farmland", "glass", "mod:sulfur"), Evidence.of(visited).generated(), "both sides alike");
 		Evidence learned = Evidence.of(visited, 20, new Evidence.Unvisited(unvisited, 100));
-		assertEquals(Set.of("glass"), learned.generated());
+		assertEquals(Set.of("glass", "mod:sulfur"), learned.generated(), "sulfur less often where nobody went, but not crowded where they did");
 		assertEquals(Evidence.PLACED, learned.weight("grass_block", "farmland[moisture=7]"));
 		List<ChunkDiff> small = unvisited.subList(0, 10);
-		assertEquals(Set.of("farmland", "glass"), Evidence.of(visited, 20, new Evidence.Unvisited(small, 10)).generated(), "too few sampled to judge");
+		assertEquals(Set.of("farmland", "glass", "mod:sulfur"), Evidence.of(visited, 20, new Evidence.Unvisited(small, 10)).generated(), "too few sampled to judge");
+	}
+
+	/** An ancient city regenerates differently, in unvisited chunks too, but its bricks in a house are a player's. */
+	@Test
+	void blocksInRecordedStructuresTeachNothing() {
+		List<ChunkDiff> visited = new ArrayList<>();
+		List<ChunkDiff> unvisited = new ArrayList<>();
+		for (int c = 0; c < 40; c++) {
+			List<Block> blocks = new ArrayList<>();
+			for (int i = 0; i < 4; i++) {
+				blocks.add(new Block(c * 16 + i, -40, 0, "deepslate", "deepslate_bricks"));
+				blocks.add(new Block(c * 16 + i, -40, 1, "deepslate_bricks", "air"));
+			}
+			(c < 20 ? visited : unvisited).add(new ChunkDiff(c, 0, blocks));
+		}
+		visited.add(new ChunkDiff(100, 0, List.of(new Block(1600, 70, 0, "air", "deepslate_bricks"))));
+		int[] box = {0, -50, 0, 40 * 16 - 1, -30, 15};
+		Structures city = new Structures(List.of(new Structures.Piece("minecraft:ancient_city", box)));
+		assertEquals(Set.of("deepslate_bricks"), Evidence.of(visited, 21, new Evidence.Unvisited(unvisited, 20)).generated());
+		Evidence learned = Evidence.of(visited, 21, new Evidence.Unvisited(unvisited, 20), city);
+		assertEquals(Set.of(), learned.generated());
+		assertEquals(Evidence.PLACED, learned.weight(new Block(1600, 70, 0, "air", "deepslate_bricks")));
+		assertEquals(0, learned.weight(new Block(3, -40, 1, "deepslate_bricks", "cracked_deepslate_bricks")), "the city regenerated otherwise");
+		assertEquals(Evidence.PLACED, learned.weight(new Block(3, -40, 2, "air", "nether_portal[axis=x]")), "a player's, in the city");
+		assertEquals(Set.of("deepslate_bricks"), Evidence.of(visited).generated(), "no sample: both sides alike");
+		assertEquals(Set.of(), Evidence.of(visited, 21, Evidence.Unvisited.NONE, city).generated());
+		Structures modCity = new Structures(List.of(new Structures.Piece("cities:sky_city", box)));
+		assertEquals(Set.of("deepslate_bricks"), Evidence.of(visited, 21, new Evidence.Unvisited(unvisited, 20), modCity).generated(),
+				"a mod's structure, which no regeneration places, teaches as anywhere");
 	}
 
 	/** An ocean ruin crumbles at random, so regeneration loses some bricks and gains others. */

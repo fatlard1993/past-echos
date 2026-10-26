@@ -237,6 +237,24 @@ class ExtractTest {
 		assertEquals(echoes.subList(2, 4), Extract.unrepeated(echoes));
 	}
 
+	/** A player's torch-lit cobbled deepslate tower, and three mines of the same palette far off under stone. */
+	@Test
+	void minesMakeNoCopiesOfABuildAboveGround() {
+		Echo tower = echo(0, 0, column("cobbled_deepslate", 8, "torch"));
+		List<Echo> echoes = new ArrayList<>(List.of(tower));
+		for (int i = 1; i <= 3; i++) {
+			Map<List<Integer>, String> mine = new LinkedHashMap<>();
+			for (int x = 0; x < 3 + i; x++) {
+				mine.put(List.of(x, 0, 0), "cobbled_deepslate");
+				mine.put(List.of(x, 2, 0), "stone");
+			}
+			mine.put(List.of(1, 1, 0), "torch");
+			echoes.add(echo(i * 1000, 0, mine, "stone"));
+		}
+		assertEquals(3, echoes.stream().filter(e -> !Extract.onSurface(e)).count());
+		assertEquals(List.of(tower), Extract.placeable(echoes));
+	}
+
 	private static Map<List<Integer>, String> column(String block, int height, String torch) {
 		Map<List<Integer>, String> cells = new LinkedHashMap<>();
 		for (int y = 0; y < height; y++) {
@@ -249,6 +267,11 @@ class ExtractTest {
 
 	/** An echo holding these blocks, at positions from its corner, all evidence. */
 	private static Echo echo(int x, int z, Map<List<Integer>, String> cells) {
+		return echo(x, z, cells, null);
+	}
+
+	/** An echo holding these blocks, all evidence but those of the unchanged block. */
+	private static Echo echo(int x, int z, Map<List<Integer>, String> cells, String unchanged) {
 		int sx = cells.keySet().stream().mapToInt(c -> c.get(0)).max().orElse(0) + 1;
 		int sy = cells.keySet().stream().mapToInt(c -> c.get(1)).max().orElse(0) + 1;
 		int sz = cells.keySet().stream().mapToInt(c -> c.get(2)).max().orElse(0) + 1;
@@ -261,7 +284,7 @@ class ExtractTest {
 			}
 			int i = (c.get(1) * sz + c.get(2)) * sx + c.get(0);
 			states[i] = palette.indexOf(block);
-			marks[i] = EchoFile.EVIDENCE;
+			marks[i] = block.equals(unchanged) ? EchoFile.TERRAIN : EchoFile.EVIDENCE;
 		});
 		return new Echo(x, 200, z, sx, sy, sz, cells.size(), 5023, palette.toArray(String[]::new), states, marks, List.of());
 	}

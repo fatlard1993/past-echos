@@ -25,7 +25,7 @@ public final class Dimension {
 	public final List<RegionFile.Unreadable> unreadable = new ArrayList<>();
 	private final Map<Long, Byte> flags = new HashMap<>();
 	private final Map<Long, Long> inhabited = new HashMap<>();
-	private final List<int[]> structurePieces = new ArrayList<>();
+	private final List<Structures.Piece> structurePieces = new ArrayList<>();
 
 	private Dimension(List<Path> regionFiles) {
 		this.regionFiles = regionFiles;
@@ -127,8 +127,8 @@ public final class Dimension {
 		return t == null || t >= minTicks;
 	}
 
-	/** The boxes of every structure piece the dimension's chunks record, from {@link Chunk#structurePieces}. */
-	public List<int[]> structurePieces() {
+	/** Every structure piece the dimension's chunks record, from {@link Chunk#structurePieces}. */
+	public List<Structures.Piece> structurePieces() {
 		return structurePieces;
 	}
 

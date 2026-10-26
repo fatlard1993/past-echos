@@ -41,7 +41,7 @@ public final class Clusters {
 		List<Double> weights = new ArrayList<>();
 		for (ChunkDiff chunk : diff) {
 			for (Block b : chunk.blocks()) {
-				double w = evidence.weight(b.reference(), b.saved());
+				double w = evidence.weight(b);
 				if (w > 0) {
 					blocks.add(b);
 					weights.add(w);
