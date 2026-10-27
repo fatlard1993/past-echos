@@ -23,5 +23,12 @@
     "fabric-api": "${fabricApiVersion}",
     "minecraft": "${minecraftDependency}",
     "java": ">=25"
+  },
+  "custom": {
+    "modmenu": {
+      "links": {
+        "modmenu.donate": "https://github.com/sponsors/fatlard1993"
+      }
+    }
   }
 }
