@@ -3,6 +3,7 @@ package justfatlard.past_echos.worldgen;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import java.util.Optional;
 import java.util.OptionalInt;
 import justfatlard.past_echos.echo.Library;
@@ -10,9 +11,13 @@ import justfatlard.past_echos.echo.Ruin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Vec3i;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureType;
@@ -68,18 +73,7 @@ public class EchoStructure extends Structure {
 		int z1 = z0 + size.getZ() - 1;
 		int cx = (x0 + x1) / 2;
 		int cz = (z0 + z1) / 2;
-		OptionalInt ground = Siting.ground(x0, z0, x1, z1, new Siting.Ground() {
-			@Override
-			public int top(int x, int z) {
-				return EchoStructure.top(context, x, z);
-			}
-
-			@Override
-			public boolean wet(int x, int z) {
-				return !context.chunkGenerator().getBaseColumn(x, z, context.heightAccessor(), context.randomState())
-						.getBlock(top(x, z)).getFluidState().isEmpty();
-			}
-		}, maxSlope, slopePerChunk);
+		OptionalInt ground = Siting.ground(x0, z0, x1, z1, ground(context), maxSlope, slopePerChunk);
 		if (ground.isEmpty()) {
 			return Optional.empty();
 		}
@@ -92,9 +86,73 @@ public class EchoStructure extends Structure {
 				builder -> builder.addPiece(new EchoPiece(ruin, position, rotation, weathering))));
 	}
 
+	private static Siting.Ground ground(GenerationContext context) {
+		if (context.chunkGenerator() instanceof NoiseBasedChunkGenerator) {
+			return new ColumnGround(context);
+		}
+		return new Siting.Ground() {
+			@Override
+			public int top(int x, int z) {
+				return EchoStructure.top(context, x, z);
+			}
+
+			@Override
+			public boolean wet(int x, int z) {
+				return !context.chunkGenerator().getBaseColumn(x, z, context.heightAccessor(), context.randomState())
+						.getBlock(top(x, z)).getFluidState().isEmpty();
+			}
+		};
+	}
+
 	private static int top(GenerationContext context, int x, int z) {
 		return context.chunkGenerator().getFirstOccupiedHeight(x, z, Heightmap.Types.WORLD_SURFACE_WG, context.heightAccessor(),
 				context.randomState());
+	}
+
+	/**
+	 * Both answers off one noise column. A noise generator works out a whole column to find its top,
+	 * so asking for the top and then whether it is wet would work out the same column three times.
+	 */
+	private static final class ColumnGround implements Siting.Ground {
+		private final GenerationContext context;
+		private final Long2LongOpenHashMap known = new Long2LongOpenHashMap();
+
+		ColumnGround(GenerationContext context) {
+			this.context = context;
+			known.defaultReturnValue(Long.MIN_VALUE);
+		}
+
+		@Override
+		public int top(int x, int z) {
+			return (int) (column(x, z) >> 32);
+		}
+
+		@Override
+		public boolean wet(int x, int z) {
+			return (column(x, z) & 1) != 0;
+		}
+
+		/** The top in the high half, as {@code getFirstOccupiedHeight} gives it, and whether it is wet in the low. */
+		private long column(int x, int z) {
+			long key = ChunkPos.pack(x, z);
+			long both = known.get(key);
+			if (both != Long.MIN_VALUE) {
+				return both;
+			}
+			LevelHeightAccessor heights = context.heightAccessor();
+			NoiseColumn column = context.chunkGenerator().getBaseColumn(x, z, heights, context.randomState());
+			int top = heights.getMinY() - 1;
+			for (int y = heights.getMaxY(); y >= heights.getMinY(); y--) {
+				if (!column.getBlock(y).isAir()) {
+					top = y;
+					break;
+				}
+			}
+			boolean wet = !column.getBlock(top).getFluidState().isEmpty();
+			both = ((long) top << 32) | (wet ? 1 : 0);
+			known.put(key, both);
+			return both;
+		}
 	}
 
 	@Override
